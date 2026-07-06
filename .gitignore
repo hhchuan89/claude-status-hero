@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# Per-user runtime state (created by --set-* commands, next to the script)
+statusline-hero.txt
+statusline-style.txt
+statusline-pixels.txt
+statusline-size.txt
+statusline-theme.txt
+
+# Local backups
+*.backup-*.py
+*.daylight-backup.py

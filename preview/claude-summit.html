@@ -1,0 +1,245 @@
+<style>
+  :root{
+    --bg:#efece3; --panel:#f8f6f0; --edge:#e0dccf; --ink:#1c1e24; --mut:#6b6a63;
+    --accent:#c8891a; --z-green:#2fa25a; --z-yellow:#d99a12; --z-red:#e5484d;
+    --coin:#f2c235; --screen:#0b0e16; --screen-edge:#222838;
+    --mono:ui-monospace,"Cascadia Code","Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;
+    --sans:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#0d0f14;--panel:#141821;--edge:#242a36;--ink:#e8e9ec;--mut:#8b91a0;--accent:#f0b429}
+  }
+  :root[data-theme="light"]{--bg:#efece3;--panel:#f8f6f0;--edge:#e0dccf;--ink:#1c1e24;--mut:#6b6a63;--accent:#c8891a}
+  :root[data-theme="dark"]{--bg:#0d0f14;--panel:#141821;--edge:#242a36;--ink:#e8e9ec;--mut:#8b91a0;--accent:#f0b429}
+
+  *{box-sizing:border-box} body{margin:0}
+  .wrap{max-width:860px;margin:0 auto;padding:40px 22px 72px;font-family:var(--sans);color:var(--ink);background:var(--bg);min-height:100vh}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+  h1{font-family:var(--mono);font-weight:700;font-size:clamp(30px,6vw,52px);letter-spacing:-.01em;margin:0 0 8px;line-height:1;text-wrap:balance}
+  .lede{margin:0 0 26px;color:var(--mut);font-size:16px;max-width:62ch;line-height:1.5}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .screen{background:var(--screen);border:1px solid var(--screen-edge);border-radius:12px;overflow:hidden;box-shadow:0 20px 54px -26px rgba(0,0,0,.6)}
+  .screen__bar{display:flex;align-items:center;gap:8px;padding:11px 14px;background:#12151f;border-bottom:1px solid var(--screen-edge)}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+  .screen__title{margin-left:8px;font-family:var(--mono);font-size:12px;color:#5b6478;letter-spacing:.04em}
+  .hud{font-family:var(--mono);font-size:clamp(11px,2vw,14px);color:#aeb6c6;padding:12px 16px 0;white-space:nowrap;overflow-x:auto}
+  .hud .b{color:#e8ecf4;font-weight:700}.hud .dim{color:#5b6478}
+  #cv{display:block;width:100%;height:auto;image-rendering:pixelated;padding:10px 14px}
+  .stats{font-family:var(--mono);font-size:clamp(11px,2vw,14px);padding:0 16px 14px;display:flex;gap:18px;flex-wrap:wrap}
+  .stats .k{color:#5b6478}
+  .stats .v{font-variant-numeric:tabular-nums}
+
+  .legend{margin-top:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+  .leg{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:11px 13px}
+  .sw{width:16px;height:16px;border-radius:4px;flex:none;margin-top:1px}
+  .leg b{font-size:13px}.leg span{display:block;font-size:12px;color:var(--mut);line-height:1.4}
+  .leg .t{font-family:var(--mono);font-size:12.5px;color:var(--ink);font-weight:700}
+
+  .controls{margin-top:18px;background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:16px 20px;display:grid;gap:13px}
+  .ctl{display:flex;align-items:center;gap:14px}
+  .ctl label{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);min-width:112px}
+  input[type=range]{flex:1;min-width:150px;height:22px}
+  .ctl .val{font-family:var(--mono);font-variant-numeric:tabular-nums;min-width:42px;text-align:right}
+  #r5{accent-color:var(--z-green)}#rc{accent-color:#8a6a3a}#r7{accent-color:#e0a52e}
+  .heroes{display:flex;flex-wrap:wrap;gap:8px}
+  .hero-btn{font-family:var(--mono);font-size:13px;padding:7px 12px;border:1px solid var(--edge);border-radius:8px;cursor:pointer;background:transparent;color:var(--mut)}
+  .hero-btn[aria-pressed="true"]{background:var(--accent);color:#111;border-color:var(--accent)}
+  .btn{font-family:var(--mono);font-size:13px;padding:8px 15px;border-radius:8px;cursor:pointer;border:1px solid var(--accent);background:transparent;color:var(--accent)}
+  .btn:hover{background:var(--accent);color:#111}
+  .btn:focus-visible,.hero-btn:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .card{margin-top:18px;background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:18px 20px}
+  .card h3{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 12px}
+  .card ul{margin:0;padding-left:18px}
+  .card li{font-size:14px;line-height:1.6;color:var(--mut);margin-bottom:6px}
+  .card li b{color:var(--ink)}
+  .foot{margin-top:22px;font-size:12.5px;color:var(--mut);font-family:var(--mono);line-height:1.6}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Claude Code · statusline concept · mockup for approval</p>
+  <h1>SUMMIT ⛰</h1>
+  <p class="lede">Climb your <b>5-hour budget</b> up a mountain whose height is your <b>context window</b>, under a sky set by your <b>weekly budget</b>. Drag the three sliders — this is a <b>design mockup</b> to approve before I port it to the terminal (which will be chunkier half-block pixels; slopes go stair-stepped).</p>
+
+  <div class="screen">
+    <div class="screen__bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="screen__title">claude — statusline — SUMMIT</span>
+    </div>
+    <div class="hud" id="hud"></div>
+    <canvas id="cv" width="576" height="216" role="img" aria-label="Pixel scene: a hero climbing a context-height mountain"></canvas>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="legend">
+    <div class="leg"><span class="sw" style="background:#7a5a30"></span><div><span class="t">Mountain height</span><span>= <b style="color:var(--ink)">context %</b> — more context, bigger climb</span></div></div>
+    <div class="leg"><span class="sw" style="background:#e5312b"></span><div><span class="t">Hero position →</span><span>= <b style="color:var(--ink)">5h budget %</b> — climbs left→right to the flag</span></div></div>
+    <div class="leg"><span class="sw" style="background:linear-gradient(#2a4a8a,#f2a15b)"></span><div><span class="t">Sky / sun</span><span>= <b style="color:var(--ink)">7d weekly %</b> — day → sunset → night</span></div></div>
+    <div class="leg"><span class="sw" style="background:var(--coin)"></span><div><span class="t">Coins collected</span><span>climb progress; grabbed as you pass</span></div></div>
+  </div>
+
+  <div class="controls">
+    <div class="ctl"><label for="r5">5h budget</label><input id="r5" type="range" min="0" max="100" value="35"><span class="val" id="v5"></span></div>
+    <div class="ctl"><label for="rc">context</label><input id="rc" type="range" min="0" max="100" value="55"><span class="val" id="vc"></span></div>
+    <div class="ctl"><label for="r7">7d weekly</label><input id="r7" type="range" min="0" max="100" value="20"><span class="val" id="v7"></span></div>
+    <div class="ctl"><label>hero</label><span class="heroes" id="heroes" role="group" aria-label="Choose hero"></span></div>
+    <div class="ctl"><button class="btn" id="sim">▶ Simulate a work session</button><span class="dim" style="color:var(--mut);font-family:var(--mono);font-size:12px">honest ~1 fps bob</span></div>
+  </div>
+
+  <div class="card">
+    <h3>More ideas — pick any (or veto)</h3>
+    <ul>
+      <li><b>Snow-cap turns red</b> when context nears full (compaction coming) — a danger read without a number.</li>
+      <li><b>“SUMMIT!” banner + flag wave</b> when 5h hits 100% (you reached the peak / hit the limit).</li>
+      <li><b>Second climber for 7d</b> instead of the sky — a faint ghost racing the weekly deadline. (Busier; sky is calmer.)</li>
+      <li><b>Pit / stumble</b> if context ≥ 95% — the slope cracks, signalling an imminent /compact.</li>
+      <li><b>Coin counter as a mini score</b> in the HUD (🪙 3/6), just for fun.</li>
+    </ul>
+  </div>
+
+  <p class="foot">Terminal reality check: ~40 columns wide × ~6 rows tall, ANSI 256-colour, half-block pixels — so the mountain edges will look stair-stepped and the hero stays chunky. This canvas shows the <b>concept & colour</b>; I'll match it as closely as half-blocks allow.</p>
+</div>
+
+<script>
+(function(){
+  var cv=document.getElementById('cv'),g=cv.getContext('2d');
+  var W=48,H=18,S=12; cv.width=W*S; cv.height=H*S;
+  var C={ R:'#e5312b',S:'#f4c99a',B:'#8a5a12',o:'#2340c8',w:'#ffffff',k:'#141414',
+          Y:'#f5c518',C:'#ff8fb0',c:'#1fd4d4',g:'#37c25a',m:'#74e0be' };
+  // mini heroes (5 wide x 6 tall)
+  var HEROES={
+    mario:{label:'🍄 Mario',px:[".RRR.","BSSk.",".RRR.","wRRRw",".ooo.",".B.B."]},
+    pika:{label:'⚡ Pikachu',px:["k...k",".YYY.",".YkY.","CYYYC",".YYY.",".B.B."]},
+    ghost:{label:'👻 Ghost',px:[".ccc.","ccccc","ckckc","ccccc","ccccc","c.c.c"]},
+    goomba:{label:'🟤 Goomba',px:[".BBB.","BBBBB","BkBkB","BBBBB",".BBB.","w...w"]},
+    slime:{label:'🟢 Slime',px:[".....",".ggg.","ggggg","gkgkg","ggggg","ggggg"]},
+    avatar:{label:'🟩 Avatar',px:["mmmmm","mkmkm","mmmmm","mwwwm","mmmmm",".mmm."]}
+  };
+  var st={five:35,ctx:55,week:20,hero:'mario',bob:0};
+
+  function px(x,y,color){g.fillStyle=color;g.fillRect(x*S,y*S,S,S);}
+  function lerp(a,b,t){return a+(b-a)*t;}
+  function hex(a,b,t){ // interpolate two #rrggbb
+    function n(h,i){return parseInt(h.substr(1+i*2,2),16);}
+    var r=Math.round(lerp(n(a,0),n(b,0),t)),gg=Math.round(lerp(n(a,1),n(b,1),t)),bl=Math.round(lerp(n(a,2),n(b,2),t));
+    return 'rgb('+r+','+gg+','+bl+')';
+  }
+  function zc(v){return v>=90?'#e5484d':v>=70?'#d99a12':'#2fa25a';}
+
+  var baseY=H-2, peakCol=W-5;
+  function terrainTop(x,peakH){ // rises to the right toward the peak column, then flat cap
+    var xx=Math.min(x,peakCol);
+    return baseY-Math.round(peakH*(xx/peakCol));
+  }
+
+  function draw(){
+    var t7=st.week/100;
+    // sky gradient by weekly budget: day -> sunset -> night
+    var top=hex('#79c6ea', '#0b1330', t7), bot=hex('#cdeafd', '#243a63', t7);
+    // vertical sky gradient between the two stops
+    for(var yy=0;yy<H;yy++){
+      var f=yy/(H-1);
+      g.fillStyle=hex2(top,bot,f);
+      g.fillRect(0,yy*S,W*S,S);
+    }
+    // stars at night
+    if(st.week>70){ g.fillStyle='rgba(255,255,255,'+((st.week-70)/30)+')';
+      [[4,2],[9,4],[15,1],[22,3],[30,2],[38,4],[43,1]].forEach(function(p){g.fillRect(p[0]*S+3,p[1]*S+3,2,2);}); }
+    // sun / moon: travels right & down as weekly burns (setting)
+    var sunX=Math.round(lerp(6,W-8,t7)), sunY=Math.round(lerp(2,baseY-3,t7));
+    g.fillStyle= st.week>75 ? '#e8eefc' : hex('#fff2a0','#ff8a3d',Math.min(1,t7*1.4));
+    g.beginPath(); g.arc(sunX*S+S,sunY*S+S,S*1.6,0,7); g.fill();
+
+    var peakH=2+Math.round(st.ctx/100*(baseY-4));
+    // back range (parallax, lighter, shorter)
+    for(var x=0;x<W;x++){ var bt=baseY-Math.round(peakH*0.55*(Math.min(x+6,peakCol)/peakCol));
+      for(var y2=bt;y2<baseY;y2++) px(x,y2, hex('#6d7f9a','#4a5872',(baseY-y2)/Math.max(1,peakH))); }
+    // front mountain (height = context)
+    for(var x2=0;x2<W;x2++){
+      var tt2=terrainTop(x2,peakH);
+      for(var y3=tt2;y3<baseY;y3++){
+        var depth=(baseY-y3)/Math.max(1,peakH);
+        var col= (y3-tt2)<=1 && tt2<baseY-2 && depth>0.6 ? '#f4f7fb'   // snow cap
+                 : depth>0.45 ? hex('#8a5a2a','#6b4a22',(depth-0.45)/0.55) // rock
+                 : hex('#3f8f4f','#2f7a40',depth/0.45);                    // green base
+        // context danger: snow cap reddens near full
+        if(col==='#f4f7fb' && st.ctx>=90) col='#f2b6b6';
+        px(x2,y3,col);
+      }
+    }
+    // ground base
+    for(var xb=0;xb<W;xb++){ px(xb,baseY,'#2b2419'); px(xb,baseY+1,'#20190f'); }
+
+    // coins along the slope
+    var heroCol=Math.round(st.five/100*(peakCol-3));
+    [8,15,22,29,36,peakCol-2].forEach(function(cx){
+      var cy=terrainTop(cx,peakH)-2;
+      if(cx<=heroCol){ if(st.bob){g.fillStyle='rgba(242,194,53,.35)';g.fillRect(cx*S+3,cy*S+3,S-6,S-6);} } // collected: faint sparkle
+      else { g.fillStyle='#f2c235'; g.beginPath(); g.arc(cx*S+S/2,cy*S+S/2,S/2-1,0,7); g.fill();
+             g.fillStyle='#fff0b0'; g.fillRect(cx*S+S/2-1,cy*S+2,2,S-4); }
+    });
+
+    // flag at the peak
+    var fy=terrainTop(peakCol,peakH);
+    g.fillStyle='#d9d2c4'; g.fillRect(peakCol*S+2,(fy-4)*S,2,4*S);
+    g.fillStyle='#e5484d'; g.beginPath(); g.moveTo(peakCol*S+4,(fy-4)*S); g.lineTo(peakCol*S+4+S*1.4,(fy-4)*S+S*0.6); g.lineTo(peakCol*S+4,(fy-4)*S+S*1.2); g.fill();
+
+    // hero on the slope at 5h position
+    var jumping=st.five>=90;
+    var hpx=HEROES[st.hero].px, hw=5,hh=6;
+    var groundY=terrainTop(heroCol+2,peakH);
+    var topY=groundY-hh-(jumping?4:(st.bob?1:0));
+    for(var ry=0;ry<hh;ry++) for(var rx=0;rx<hw;rx++){ var ch=hpx[ry][rx]; if(C[ch]) px(heroCol+rx, topY+ry, C[ch]); }
+
+    // HUD + stats
+    document.getElementById('hud').innerHTML='<span class="b">BitBucket</span> <span class="dim">[Opus 4.8]</span> <span style="color:#5fd08a">⎇ main</span>  <span class="dim">⏱ 46m</span>  <span class="dim">$14.79</span>';
+    var coins=[8,15,22,29,36,peakCol-2].filter(function(cx){return cx<=heroCol;}).length;
+    document.getElementById('stats').innerHTML=
+      '<span><span class="k">5h</span> <span class="v" style="color:'+zc(st.five)+'">'+st.five+'%</span> <span class="k">↻2h</span></span>'+
+      '<span><span class="k">7d</span> <span class="v" style="color:'+zc(st.week)+'">'+st.week+'%</span> <span class="k">↻3d</span></span>'+
+      '<span><span class="k">ctx</span> <span class="v" style="color:'+zc(st.ctx)+'">'+st.ctx+'%</span></span>'+
+      '<span><span class="k">🪙</span> <span class="v">'+coins+'/6</span></span>';
+  }
+  function hex2(a,b,t){ // a,b are 'rgb(...)' strings -> interpolate
+    function p(s){return s.match(/\d+/g).map(Number);} var A=p(a),Bb=p(b);
+    return 'rgb('+Math.round(lerp(A[0],Bb[0],t))+','+Math.round(lerp(A[1],Bb[1],t))+','+Math.round(lerp(A[2],Bb[2],t))+')';
+  }
+
+  // controls
+  function bind(id,vid,key){var r=document.getElementById(id),v=document.getElementById(vid);
+    function u(){st[key]=+r.value;v.textContent=r.value+'%';draw();} r.addEventListener('input',u);u();}
+  bind('r5','v5','five');bind('rc','vc','ctx');bind('r7','v7','week');
+
+  var box=document.getElementById('heroes');
+  Object.keys(HEROES).forEach(function(name){
+    var b=document.createElement('button');b.className='hero-btn';b.textContent=HEROES[name].label;
+    b.setAttribute('aria-pressed',name===st.hero);
+    b.addEventListener('click',function(){st.hero=name;
+      Array.prototype.forEach.call(box.children,function(c,i){c.setAttribute('aria-pressed',Object.keys(HEROES)[i]===name);});draw();});
+    box.appendChild(b);
+  });
+
+  var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  if(!reduce) setInterval(function(){st.bob^=1;draw();},1000);
+
+  var sim=null;
+  document.getElementById('sim').addEventListener('click',function(){
+    if(sim){clearInterval(sim);sim=null;this.textContent='▶ Simulate a work session';return;}
+    this.textContent='⏸ Stop';var self=this;
+    document.getElementById('r5').value=3;document.getElementById('rc').value=8;st.five=3;st.ctx=8;
+    sim=setInterval(function(){
+      st.five=Math.min(100,st.five+Math.round(3+Math.random()*6));
+      st.ctx=Math.min(100,st.ctx+Math.round(2+Math.random()*4));
+      st.week=Math.min(100,st.week+1);
+      document.getElementById('r5').value=st.five;document.getElementById('rc').value=st.ctx;document.getElementById('r7').value=st.week;
+      document.getElementById('v5').textContent=st.five+'%';document.getElementById('vc').textContent=st.ctx+'%';document.getElementById('v7').textContent=st.week+'%';
+      if(st.five>=100){clearInterval(sim);sim=null;self.textContent='▶ Simulate a work session';}
+      draw();
+    },650);
+  });
+
+  draw();
+})();
+</script>

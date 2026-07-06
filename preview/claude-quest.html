@@ -1,0 +1,229 @@
+<style>
+  :root{
+    --bg:#efece3; --panel:#f8f6f0; --edge:#e0dccf; --ink:#1c1e24; --mut:#6b6a63;
+    --accent:#c8891a; --accent-soft:#f0d79a;
+    --term-bg:#f6f4ee; --term-fg:#2a2c33; --term-dim:#b9b6ab; --term-edge:#dedacd;
+    --z-green:#2fa25a; --z-yellow:#d99a12; --z-red:#e5484d;
+    /* sprite palette (identical hues both themes) */
+    --p-R:#e5312b; --p-S:#f4c99a; --p-B:#8a5a12; --p-o:#2340c8; --p-w:#ffffff;
+    --p-k:#141414; --p-Y:#f5c518; --p-C:#ff8fb0; --p-G:#3fbf6b;
+    --p-c:#1fd4d4; --p-g:#37c25a; --p-m:#74e0be;
+    --coin:#e9b824;
+    --mono:ui-monospace,"Cascadia Code","Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;
+    --sans:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0d0f14; --panel:#141821; --edge:#242a36; --ink:#e8e9ec; --mut:#8b91a0;
+      --accent:#f0b429; --accent-soft:#3a3117;
+      --term-bg:#0b0e14; --term-fg:#c9d1d9; --term-dim:#39414f; --term-edge:#1c222c;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#efece3; --panel:#f8f6f0; --edge:#e0dccf; --ink:#1c1e24; --mut:#6b6a63;
+    --accent:#c8891a; --accent-soft:#f0d79a;
+    --term-bg:#f6f4ee; --term-fg:#2a2c33; --term-dim:#b9b6ab; --term-edge:#dedacd;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0d0f14; --panel:#141821; --edge:#242a36; --ink:#e8e9ec; --mut:#8b91a0;
+    --accent:#f0b429; --accent-soft:#3a3117;
+    --term-bg:#0b0e14; --term-fg:#c9d1d9; --term-dim:#39414f; --term-edge:#1c222c;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0}
+  .wrap{max-width:860px;margin:0 auto;padding:40px 22px 72px;font-family:var(--sans);color:var(--ink);background:var(--bg);min-height:100vh}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+  h1{font-family:var(--mono);font-weight:700;font-size:clamp(30px,6vw,52px);letter-spacing:-.01em;margin:0 0 8px;line-height:1;text-wrap:balance}
+  h1 .blink{color:var(--accent)}
+  .lede{margin:0 0 28px;color:var(--mut);font-size:16px;max-width:62ch;line-height:1.5}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .term{background:var(--term-bg);border:1px solid var(--term-edge);border-radius:12px;overflow:hidden;box-shadow:0 18px 50px -24px rgba(0,0,0,.55)}
+  .term__bar{display:flex;align-items:center;gap:8px;padding:11px 14px;background:color-mix(in srgb,var(--term-bg) 82%, var(--ink) 18%);border-bottom:1px solid var(--term-edge)}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+  .term__title{margin-left:8px;font-family:var(--mono);font-size:12px;color:var(--term-dim);letter-spacing:.04em}
+  .sl{font-family:var(--mono);white-space:pre;line-height:1.18;font-size:clamp(13px,2.3vw,17px);color:var(--term-fg);padding:16px 18px 18px;overflow-x:auto}
+  .sl .row{display:block;min-height:1.18em}
+  .sprite{transition:transform .18s ease}
+  @media (prefers-reduced-motion:reduce){.sprite{transition:none}}
+  .dim{color:var(--term-dim)}
+  .b{font-weight:700}
+
+  .controls{margin-top:20px;display:grid;grid-template-columns:1fr;gap:16px;background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:18px 20px}
+  .ctl-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
+  .ctl-label{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);min-width:74px}
+  input[type=range]{flex:1;min-width:180px;accent-color:var(--accent);height:22px}
+  .val{font-family:var(--mono);font-variant-numeric:tabular-nums;min-width:96px;text-align:right;font-size:14px}
+  .val .z-green{color:var(--z-green)}.val .z-yellow{color:var(--z-yellow)}.val .z-red{color:var(--z-red)}
+  .heroes{display:flex;flex-wrap:wrap;gap:8px}
+  .hero-btn{font-family:var(--mono);font-size:13px;padding:7px 13px;border:1px solid var(--edge);border-radius:8px;cursor:pointer;background:transparent;color:var(--mut);letter-spacing:.01em}
+  .hero-btn[aria-pressed="true"]{background:var(--accent);color:#111;border-color:var(--accent)}
+  .btn{font-family:var(--mono);font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer;border:1px solid var(--accent);background:transparent;color:var(--accent);letter-spacing:.02em}
+  .btn:hover{background:var(--accent);color:#111}
+  .btn:focus-visible,.hero-btn:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px}
+  @media (max-width:640px){.grid2{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:18px 20px}
+  .card h3{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 12px}
+  .card p{margin:0 0 10px;font-size:14px;line-height:1.55;color:var(--mut)}
+  .card p b{color:var(--ink);font-weight:600}
+  .card code{font-family:var(--mono);font-size:12.5px;background:color-mix(in srgb,var(--ink) 8%,transparent);padding:1px 6px;border-radius:5px;color:var(--ink);white-space:nowrap}
+  .rule{height:1px;background:var(--edge);border:0;margin:10px 0}
+  .foot{margin-top:26px;font-size:12.5px;color:var(--mut);font-family:var(--mono);line-height:1.6}
+  .kbd{display:inline-block;border:1px solid var(--z-red);color:var(--z-red);border-radius:5px;padding:0 6px;font-size:11px}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Claude Code · statusline · now shipped to your config</p>
+  <h1>CLAUDE QUEST<span class="blink">▮</span></h1>
+  <p class="lede">Your usage, as a 1&nbsp;fps side-scroller. The hero stands at your <b>5-hour rate-limit %</b> and walks toward the deadline flag; it <b>bobs once a second</b>, <b>hustles</b> past 70%, and <b>jumps</b> in the red zone. Everything below is the <b>real</b> statusline — same sprite data, honest cadence. <b>Pick a hero</b> below (each person chooses their own with one command — no extra files).</p>
+
+  <div class="term" role="img" aria-label="Animated preview of the Claude Quest statusline">
+    <div class="term__bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="term__title">claude — ~/BitBucket — statusline</span>
+    </div>
+    <div class="sl" id="sl"></div>
+  </div>
+
+  <div class="controls">
+    <div class="ctl-row">
+      <span class="ctl-label">5h usage</span>
+      <input id="usage" type="range" min="0" max="100" value="30" aria-label="5-hour usage percent">
+      <span class="val" id="usageVal"></span>
+    </div>
+    <div class="ctl-row">
+      <span class="ctl-label">Hero</span>
+      <span class="heroes" id="heroes" role="group" aria-label="Choose your hero"></span>
+    </div>
+    <div class="ctl-row">
+      <button class="btn" id="sim">▶ Simulate a work session</button>
+      <span class="dim" style="font-family:var(--mono);font-size:12px" id="fps"></span>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>How anyone picks their hero</h3>
+      <p>It's <b>one file</b> — no downloading a different script per character. Each person runs one command:</p>
+      <p><code>python ~/.claude/statusline-game.py --list</code><br>
+         <code>python ~/.claude/statusline-game.py --set pika</code></p>
+      <p>That writes a tiny <code>statusline-hero.txt</code> the script reads. Priority: <b><code>CLAUDE_SL_SPRITE</code> env&nbsp;→ config file&nbsp;→ default</b>. Adding a new hero = one more entry in the <code>HEROES</code> dict.</p>
+    </div>
+    <div class="card">
+      <h3>How it actually animates</h3>
+      <p>Re-runs <b>on events</b> (each assistant message, debounced 300&nbsp;ms) + an optional <code>refreshInterval</code> timer — <b>min 1 second</b>. No smooth 60&nbsp;fps; this ~1&nbsp;fps bob is the ceiling.</p>
+      <p>So <b>position</b> carries the meaning (usage); the tick just adds life + the jump. <b>Already live</b> in your config (<code>refreshInterval: 1</code>).</p>
+      <hr class="rule">
+      <p><b>Rollback:</b> point <code>command</code> back to <code>statusline.py</code>.</p>
+    </div>
+  </div>
+
+  <p class="foot">
+    Zones: <span style="color:var(--z-green)">green &lt;70%</span> · <span style="color:var(--z-yellow)">yellow ≥70%</span> · <span style="color:var(--z-red)">red ≥90% → <span class="kbd">JUMP</span></span><br>
+    The terminal render is a touch chunkier (half-block pixels); the sprite art is identical. Restart Claude Code if the new statusline doesn't appear on the next message.
+  </p>
+</div>
+
+<script>
+(function(){
+  var PAL={R:'--p-R',S:'--p-S',B:'--p-B',o:'--p-o',w:'--p-w',k:'--p-k',Y:'--p-Y',C:'--p-C',G:'--p-G',c:'--p-c',g:'--p-g',m:'--p-m'};
+  var HEROES={
+    mario:{label:'🍄 Mario',a:["..RRR..",".RRRRR.",".BSSSk.",".BSSSS.",".RRRRR.","wRRRRRw",".ooooo.","..B.B.."],b:["..RRR..",".RRRRR.",".BSSSk.",".BSSSS.",".RRRRR.","wRRRRRw",".ooooo.",".B...B."],jump:["w.RRR.w",".RRRRR.",".BSSSk.",".BSSSS.",".RRRRR.",".ooooo.","..B.B..","......."]},
+    pika:{label:'⚡ Pikachu',a:["k.....k","Yk...kY",".YYYYY.",".YkYkY.","CYYYYYC",".YYYYY.",".Y...Y.","..B.B.."],b:["k.....k","Yk...kY",".YYYYY.",".YkYkY.","CYYYYYC",".YYYYY.",".Y...Y.",".B...B."],jump:["k.....k","Yk.k.kY",".YYYYY.",".YkYkY.","CYYYYYC",".YYYYY.","..YYY..","......."]},
+    ghost:{label:'👻 Ghost',a:["..ccc..",".ccccc.","cckcckc","ccccccc","ccccccc","ccccccc","c.c.c.c","......."],b:["..ccc..",".ccccc.","cckcckc","ccccccc","ccccccc","ccccccc",".c.c.c.","......."],jump:["..ccc..",".ccccc.","cckcckc","ccccccc","ccccccc","ccccccc","ccccccc","......."]},
+    goomba:{label:'🟤 Goomba',a:["..BBB..",".BBBBB.","BBBBBBB","BkBBBkB","BBBBBBB",".BBBBB.","..w.w..","......."],b:["..BBB..",".BBBBB.","BBBBBBB","BkBBBkB","BBBBBBB",".BBBBB.",".w...w.","......."],jump:["..BBB..",".BBBBB.","BBBBBBB","BkBBBkB","BBBBBBB",".BBBBB.","..www..","......."]},
+    slime:{label:'🟢 Slime',a:[".......","..ggg..",".ggggg.","ggggggg","gkgggkg","ggggggg","ggggggg","......."],b:[".......",".......","..ggg..",".ggggg.","gkgggkg","ggggggg","ggggggg","......."],jump:["..ggg..",".ggggg.","ggggggg","gkgggkg","ggggggg","ggggggg",".ggggg.","......."]},
+    avatar:{label:'🟩 Your avatar',a:[".mmmmm.","mmmmmmm","mkmmmkm","mmmmmmm","mmwwwmm","mmmmmmm",".mmmmm.","......."],b:[".mmmmm.","mmmmmmm","mkmmmkm","mmmmmmm","mmmwmmm","mmmmmmm",".mmmmm.","......."],jump:["m.....m",".mmmmm.","mkmmmkm","mmmmmmm","mmwwwmm","mmmmmmm",".mmmmm.","......."]}
+  };
+  var TRACK_W=34, SW=7, YELLOW_AT=70, RED_AT=90;
+  var cs=getComputedStyle(document.documentElement);
+  function col(v){var name=PAL[v];return name?cs.getPropertyValue(name).trim():null;}
+
+  function spriteRows(grid,pad){
+    var rows=[],p=new Array(Math.max(0,pad)+1).join(' ');
+    for(var t=0;t<grid.length;t+=2){
+      var top=grid[t],bot=grid[t+1]||'.......',out='';
+      for(var x=0;x<top.length;x++){
+        var ct=col(top[x]),cb=col(bot[x]);
+        if(!ct&&!cb) out+=' ';
+        else if(ct&&cb) out+='<span style="color:'+ct+';background:'+cb+'">▀</span>';
+        else if(ct) out+='<span style="color:'+ct+'">▀</span>';
+        else out+='<span style="color:'+cb+'">▄</span>';
+      }
+      rows.push(p+out);
+    }
+    return rows;
+  }
+  function zone(v){return v>=RED_AT?'red':v>=YELLOW_AT?'yellow':'green';}
+  function zc(v){return cs.getPropertyValue('--z-'+zone(v)).trim();}
+  function bar(v,w){
+    var f=Math.max(0,Math.min(w,Math.round(v*w/100)));
+    return '<span style="color:'+zc(v)+'">'+new Array(f+1).join('▓')+'</span>'+
+           '<span class="dim">'+new Array(w-f+1).join('░')+'</span>';
+  }
+
+  var slEl=document.getElementById('sl');
+  var state={usage:30,hero:'mario',step:0,bob:0};
+
+  function render(){
+    var u=state.usage, g=HEROES[state.hero];
+    var jumping=u>=RED_AT, pose=jumping?'jump':(state.step?'b':'a');
+    var pos=Math.round(u/100*Math.max(0,TRACK_W-SW));
+    var week=Math.min(99,Math.round(u*0.85)), ctx=Math.min(99,Math.round(u*0.9));
+    var green=cs.getPropertyValue('--z-green').trim(), coin=cs.getPropertyValue('--coin').trim();
+    var rows=[];
+    rows.push('<span class="row"><span class="b">BitBucket</span> <span class="dim">[Opus 4.8]</span> <span style="color:'+green+'">⎇ main</span>  <span class="dim">⏱ 1h 23m</span>  <span class="dim">$1.42</span></span>');
+    var sky='';for(var i=0;i<TRACK_W;i++){sky+=(i>=6&&i%7===0&&i<TRACK_W-2)?'<span style="color:'+coin+'">•</span>':' ';}
+    rows.push('<span class="row">'+sky+' 🚩</span>');
+    var sr=spriteRows(g[pose],pos), lift=jumping?0:(state.bob?-2:0);
+    if(jumping) rows.push('<span class="row"></span>');
+    var shown=jumping?sr.slice(0,3):sr;
+    rows.push('<span class="sprite" style="display:block;transform:translateY('+lift+'px)">'+shown.map(function(r){return '<span class="row">'+r+'</span>';}).join('')+'</span>');
+    rows.push('<span class="row"><span class="b" style="color:'+zc(u)+'">5h</span> '+bar(u,TRACK_W)+' <span style="color:'+zc(u)+'">'+u+'%</span> <span class="dim">↻ 2h 14m</span></span>');
+    rows.push('<span class="row"><span class="b" style="color:'+zc(week)+'">7d</span> '+bar(week,12)+' <span style="color:'+zc(week)+'">'+week+'%</span>  <span class="dim">|</span>  <span class="dim">ctx</span> '+bar(ctx,10)+' <span style="color:'+zc(ctx)+'">'+ctx+'%</span></span>');
+    slEl.innerHTML=rows.join('');
+  }
+
+  var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  if(!reduce) setInterval(function(){state.step^=1;state.bob^=1;render();},1000);
+  document.getElementById('fps').textContent=reduce?'(motion reduced)':'~1 fps · the real ceiling';
+
+  var usage=document.getElementById('usage'),usageVal=document.getElementById('usageVal');
+  function setUsage(v){
+    state.usage=v;usage.value=v;
+    usageVal.innerHTML='<span class="z-'+zone(v)+'">'+v+'%</span>'+(v>=RED_AT?' JUMP':v>=YELLOW_AT?' hustle':' run');
+    render();
+  }
+  usage.addEventListener('input',function(){setUsage(+usage.value);});
+
+  var box=document.getElementById('heroes');
+  Object.keys(HEROES).forEach(function(name){
+    var btn=document.createElement('button');
+    btn.className='hero-btn';btn.textContent=HEROES[name].label;
+    btn.setAttribute('aria-pressed',name===state.hero);
+    btn.addEventListener('click',function(){
+      state.hero=name;
+      Array.prototype.forEach.call(box.children,function(c,i){c.setAttribute('aria-pressed',Object.keys(HEROES)[i]===name);});
+      render();
+    });
+    box.appendChild(btn);
+  });
+
+  var simTimer=null;
+  document.getElementById('sim').addEventListener('click',function(){
+    if(simTimer){clearInterval(simTimer);simTimer=null;this.textContent='▶ Simulate a work session';return;}
+    this.textContent='⏸ Stop';setUsage(4);var self=this;
+    simTimer=setInterval(function(){
+      var n=state.usage+Math.round(3+Math.random()*6);
+      if(n>=100){n=100;clearInterval(simTimer);simTimer=null;self.textContent='▶ Simulate a work session';}
+      setUsage(n);
+    },700);
+  });
+
+  setUsage(30);render();
+})();
+</script>
