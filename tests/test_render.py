@@ -352,6 +352,69 @@ plain = ANSI.sub("", p.stdout)
 nonascii = sorted({c for c in plain if ord(c) > 127})
 check("line ASCII mode pure ascii", not nonascii, repr(nonascii[:10]))
 
+# -------------------------------------------------- 6: fleet statusline style
+
+print("== fleet style ==")
+
+
+def fleet_dir(with_sessions=True):
+    d = os.path.join(tempfile.mkdtemp(prefix="sh-flt-"), "state")
+    os.makedirs(os.path.join(d, "sessions"))
+    with open(os.path.join(d, "config.json"), "w") as f:
+        json.dump({"style": "fleet"}, f)
+    if with_sessions:
+        t = time.time()
+        for i, (sid, dn, hero, st) in enumerate((
+                ("s0", "sightlab", "fox", "working"),
+                ("s1", "深度研究项目", "cat", "needs_you"),
+                ("s2", "daily-news", "frog", "idle"))):
+            with open(os.path.join(d, "sessions", sid + ".json"), "w") as f:
+                json.dump({"sid": sid, "dir": dn, "hero": hero, "state": st,
+                           "state_ts": t, "ts": t, "started_at": t - 100 + i,
+                           "ctx": 30 + i * 30, "cost": 5.0}, f)
+    return d
+
+
+for cols in ("60", "100", "200"):
+    for pl_name, pl in (("full", payload(session_id="s0")), ("empty", "{}")):
+        for ename, ev in (("default", {}), ("ascii", {"STATUS_HERO_ASCII": "1"})):
+            tag = "fleet %s/%s/cols=%s" % (pl_name, ename, cols)
+            env = dict(ev)
+            env["_dir"] = fleet_dir()
+            p = run(LINE, stdin=pl, env_extra=env, cols=cols)
+            lines = [ln for ln in p.stdout.split("\n") if ln != ""]
+            check(tag + " exit0", p.returncode == 0, p.stderr[:200])
+            check(tag + " 10 lines", len(lines) == 10, "got %d" % len(lines))
+            exp_w = max(40, min(int(cols) - 2, 100))
+            aw = False
+            widths = [disp_width(ln, aw) for ln in lines]
+            check(tag + " width==%d" % exp_w, widths == [exp_w] * 10,
+                  "got %s" % sorted(set(widths)))
+
+p = run(LINE, stdin="{}", env_extra={"_dir": fleet_dir(with_sessions=False)},
+        cols="100")
+lines = [ln for ln in p.stdout.split("\n") if ln != ""]
+check("fleet empty fleet 10 lines", len(lines) == 10, "got %d" % len(lines))
+check("fleet empty fleet message", "no fleet yet" in ANSI.sub("", p.stdout))
+
+# --style CLI wiring
+tmp3 = tempfile.mkdtemp(prefix="sh-style-")
+sp3 = os.path.join(tmp3, "settings.json")
+d3 = os.path.join(tmp3, "state")
+run(LINE, ["--install", "--settings", sp3], env_extra={"_dir": d3})
+p = run(LINE, ["--style", "fleet", "--settings", sp3], env_extra={"_dir": d3})
+check("--style fleet exit0", p.returncode == 0, p.stderr[:200])
+check("--style fleet config", json.load(open(os.path.join(d3, "config.json")))
+      ["style"] == "fleet")
+check("--style fleet refreshInterval",
+      json.load(open(sp3))["statusLine"].get("refreshInterval") == 2)
+p = run(LINE, ["--style", "gauge", "--settings", sp3], env_extra={"_dir": d3})
+check("--style gauge exit0", p.returncode == 0)
+check("--style gauge no refreshInterval",
+      "refreshInterval" not in json.load(open(sp3))["statusLine"])
+p = run(LINE, ["--style", "bogus", "--settings", sp3], env_extra={"_dir": d3})
+check("--style bogus rejected", p.returncode == 1)
+
 # ------------------------------------------------------------------ result
 
 print()

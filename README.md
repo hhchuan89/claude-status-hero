@@ -56,6 +56,21 @@ ctx ████████░░░░ 64% 128/200k · 7d █████░�
 - No Pro/Max rate data (API billing)? The track dims and shows `--%`.
   Rows are never dropped; the box never moves.
 
+### Want the fleet *inside* the statusline?
+
+```bash
+python3 hero_line.py --style fleet    # ← the board's scene, statically, 10 lines
+python3 hero_line.py --style gauge    # back to the 3-line default
+```
+
+`fleet` style replaces line 3 with a static render of the whole fleet scene —
+one pixel-art hero per live session, ctx bar, state, cost, your own window
+highlighted. Two honest trade-offs (physics, not laziness): it costs **10
+rows** in every window, and there's **no animation** — the statusline only
+re-renders when Claude Code asks (we set `refreshInterval: 2` so other
+windows' states stay fresh; beacons are steady, not blinking). The animated
+version is and stays `hero_board.py` in its own pane.
+
 ## The board (fleet dashboard)
 
 Open a spare pane, run `python3 hero_board.py`, keep it in the corner:

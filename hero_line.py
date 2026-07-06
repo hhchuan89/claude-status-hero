@@ -8,13 +8,17 @@ A Claude Code statusline that is fun but NEVER jitters:
   • doubles as the hook handler + state writer for hero_board.py
 
 Modes (first argument):
-  (none)        statusline: read Claude Code JSON on stdin, print 3 lines
-  --hook EVENT  hook handler: update this session's state file, print nothing
-  --install     register statusline + hooks in ~/.claude/settings.json
-  --uninstall   remove our entries (a timestamped backup is written either way)
-  --demo        print three sample renders (no Claude Code needed)
-  --simulate    animate a fake session in your terminal (for GIF capture)
-  --doctor      print alignment/color diagnostics for your terminal
+  (none)          statusline: read Claude Code JSON on stdin, print the lines
+  --hook EVENT    hook handler: update this session's state file, print nothing
+  --install       register statusline + hooks in ~/.claude/settings.json
+  --uninstall     remove our entries (a timestamped backup is written either way)
+  --style X       switch statusline style: `gauge` (3 lines, default) or
+                  `fleet` (10 lines: HUD + 5h track + static fleet scene with
+                  one pixel-art hero per live session; needs hero_board.py
+                  next to this file; sets statusLine.refreshInterval=2)
+  --demo          print sample renders (no Claude Code needed)
+  --simulate      animate a fake session in your terminal (for GIF capture)
+  --doctor        print alignment/color diagnostics for your terminal
 
 Env: STATUS_HERO_ASCII=1 (pure ASCII), STATUS_HERO_AMBIG_WIDE=1 (treat
 Unicode ambiguous-width as 2 columns AND swap block glyphs for ASCII),
@@ -58,6 +62,7 @@ for _stream in (sys.stdin, sys.stdout):
 RESET = "" if NO_COLOR else "\x1b[0m"
 BOLD = "" if NO_COLOR else "\x1b[1m"
 DIM = "" if NO_COLOR else "\x1b[2m"
+INVERT = "" if NO_COLOR else "\x1b[7m"
 
 
 def fg(rgb, idx):
@@ -303,6 +308,17 @@ def update_session(sid, updates):
     atomic_write(path, s)
 
 
+def load_config():
+    return load_json(os.path.join(STATE_DIR, "config.json")) or {}
+
+
+def save_config(updates):
+    _ensure_dirs()
+    cfg = load_config()
+    cfg.update(updates)
+    atomic_write(os.path.join(STATE_DIR, "config.json"), cfg)
+
+
 def all_sessions():
     out = []
     try:
@@ -390,7 +406,8 @@ def term_width():
 
 
 def render(data, width=None):
-    """The contract: returns EXACTLY 3 lines, each EXACTLY W columns wide."""
+    """The contract: a CONSTANT number of lines (3 gauge / 10 fleet), each
+    EXACTLY W columns wide."""
     W = max(40, min((width or term_width()) - 2, 100))
 
     dirname = sanitize(os.path.basename(
@@ -411,6 +428,19 @@ def render(data, width=None):
 
     branch = sanitize(git_branch(get(data, "workspace", "current_dir")
                                  or get(data, "cwd")), 40)
+
+    # persist metrics FIRST so our own lane is in the fleet we render
+    if sid:
+        update_session(sid, {
+            "dir": dirname, "cwd": sanitize(get(data, "workspace", "current_dir") or "", 200),
+            "model": model, "ctx": ctx,
+            "ctx_used_k": None if ctx_used is None else int(ctx_used / 1000),
+            "ctx_size_k": None if ctx_size is None else int(ctx_size / 1000),
+            "cost": cost, "dur_ms": num(dur),
+            "five": five, "five_reset": num(five_rs),
+            "seven": seven, "seven_reset": num(seven_rs),
+            "branch": branch, "ppid": os.getppid(),
+        })
     sessions = all_sessions()
     me = next((s for s in sessions if s.get("sid") == str(sid)), None)
     hero = (me or {}).get("hero") or (pick_hero(sid) if sid else "fox")
@@ -442,6 +472,10 @@ def render(data, width=None):
     track_w = W - disp_width(label) - disp_width(tail)
     line2 = crop_pad(label + track(five, track_w, hero) + tail, W)
 
+    # ---- fleet style: full static fleet scene instead of L3 ----
+    if load_config().get("style") == "fleet":
+        return "\n".join([line1, line2] + fleet_lines(sessions, sid, W))
+
     # ---- L3: meters + fleet ----
     fleet = fleet_summary(sessions, sid)
     used_k = "" if ctx_used is None or ctx_size is None else \
@@ -459,19 +493,6 @@ def render(data, width=None):
         if disp_width(cand) <= W:
             break
     line3 = crop_pad(cand, W)
-
-    # ---- persist metrics for the board ----
-    if sid:
-        update_session(sid, {
-            "dir": dirname, "cwd": sanitize(get(data, "workspace", "current_dir") or "", 200),
-            "model": model, "ctx": ctx,
-            "ctx_used_k": None if ctx_used is None else int(ctx_used / 1000),
-            "ctx_size_k": None if ctx_size is None else int(ctx_size / 1000),
-            "cost": cost, "dur_ms": num(dur),
-            "five": five, "five_reset": num(five_rs),
-            "seven": seven, "seven_reset": num(seven_rs),
-            "branch": branch, "ppid": os.getppid(),
-        })
 
     return "\n".join((line1, line2, line3))
 
@@ -528,6 +549,91 @@ def track(five, width, hero_name):
             out.append((passed_style if i < hero_at else GRAY + DIM) + G_TRACK + RESET)
         i += 1
     return "".join(out)
+
+
+# ------------------------------------------------------------- fleet style
+
+FLEET_ROWS = 8   # beacons + 4 sprite rows + ctx bar + names + info
+
+
+def _board_mod():
+    """Load hero_board.py (sprites live there) from our own directory."""
+    try:
+        import importlib.util
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hero_board.py")
+        spec = importlib.util.spec_from_file_location("status_hero_board", p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+    except Exception:
+        return None
+
+
+def center_to(s, width):
+    w = disp_width(s)
+    if w >= width:
+        return crop_pad(s, width)
+    lpad = (width - w) // 2
+    return " " * lpad + s + RESET + " " * (width - w - lpad)
+
+
+STATE_GLYPHS = {
+    "working": (G_WORK, CYAN, "working"),
+    "needs_you": (G_NEED, RED, "NEEDS YOU"),
+    "idle": (G_IDLE, GRAY, "idle"),
+    "compacting": ("~" if ASCII else "🌀", MAGENTA, "compacting"),
+    "ghost": ("?" if ASCII else "👻", GRAY, "stale"),
+}
+
+
+def fleet_lines(sessions, own_sid, W):
+    """The board's scene, statically, in EXACTLY FLEET_ROWS statusline rows.
+    No blink/trot (statusline refresh is event-driven) — beacons are steady."""
+    now = time.time()
+    live = [s for s in sessions if now - (num(s.get("ts")) or 0) < 2 * 3600]
+    live.sort(key=lambda s: num(s.get("started_at")) or num(s.get("ts")) or 0)
+    if not live:
+        msg = ["", "", "  no fleet yet — open more Claude Code windows", "",
+               "", "", "", ""]
+        return [crop_pad(DIM + m + RESET, W) for m in msg]
+
+    k = max(1, min(len(live), W // 14))
+    lanes, extra = live[:k], len(live) - k
+    lane_w = min(24, W // k)
+    board = _board_mod()
+
+    cells = []   # per lane: list of FLEET_ROWS strings, each lane_w wide
+    for s in lanes:
+        st = effective_state(s, now)
+        glyph, col, label = STATE_GLYPHS.get(st, STATE_GLYPHS["idle"])
+        ctx = num(s.get("ctx"))
+        rows = [center_to(col + glyph + RESET, lane_w)]
+        if board is not None:
+            spr = board.sprite_lines(s.get("hero") or "fox", 0, st)
+        else:   # hero_board.py missing next to us — emoji stand-in
+            spr = ["", hero_glyph(s.get("hero") or "fox"), "", ""]
+        for r in spr:
+            rows.append(center_to(r, lane_w))
+        rows.append(center_to(bar(ctx, min(10, lane_w - 4)) + " " + zone(ctx)
+                              + pct_txt(ctx) + RESET, lane_w))
+        name = sanitize(s.get("dir") or "?", lane_w - 2)
+        if st == "needs_you":
+            rows.append(center_to(RED + BOLD + INVERT + " " + name + " " + RESET, lane_w))
+        elif s.get("sid") == str(own_sid):
+            rows.append(center_to(CYAN + BOLD + name + RESET, lane_w))
+        else:
+            rows.append(center_to(BOLD + name + RESET, lane_w))
+        info = col + label + RESET + DIM + " $%.0f" % (num(s.get("cost")) or 0) + RESET
+        rows.append(center_to(info, lane_w))
+        cells.append(rows)
+
+    out = []
+    for r in range(FLEET_ROWS):
+        line = "".join(c[r] for c in cells)
+        if r == 0 and extra > 0:
+            line += DIM + " +%d" % extra + RESET
+        out.append(crop_pad(line, W))
+    return out
 
 
 def fleet_summary(sessions, own_sid):
@@ -816,6 +922,29 @@ def main(argv):
         except Exception:
             pass
         return 0
+    if "--style" in argv:
+        i = argv.index("--style")
+        val = argv[i + 1] if i + 1 < len(argv) else ""
+        if val not in ("fleet", "gauge"):
+            print("usage: --style fleet|gauge")
+            return 1
+        save_config({"style": val})
+        path = settings_file(argv)
+        data = load_json(path) or {}
+        sl = data.get("statusLine")
+        if isinstance(sl, dict) and MARK in (sl.get("command") or ""):
+            if val == "fleet":
+                sl["refreshInterval"] = 2   # keep other windows' states fresh
+            else:
+                sl.pop("refreshInterval", None)
+            atomic_write_pretty(path, data)
+            print("statusLine.refreshInterval %s in %s"
+                  % ("→ 2s" if val == "fleet" else "removed", path))
+        print("style → %s  (%s)" % (val,
+              "10 lines: HUD + 5h track + static fleet scene" if val == "fleet"
+              else "3 lines: HUD + 5h track + meters"))
+        print("takes effect on the next statusline refresh.")
+        return 0
     if "--install" in argv:
         install(argv)
         return 0
@@ -842,7 +971,12 @@ def main(argv):
     try:
         sys.stdout.write(render(data) + "\n")
     except Exception:
-        sys.stdout.write("status-hero\n(render error — run --doctor)\n \n")
+        try:
+            n = 10 if load_config().get("style") == "fleet" else 3
+        except Exception:
+            n = 3
+        sys.stdout.write("status-hero\n(render error — run --doctor)\n"
+                         + " \n" * (n - 2))
     return 0
 
 
