@@ -44,7 +44,7 @@ STYLE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statuslin
 STYLES = ("flat", "summit", "fleet")   # flat=track · summit=mountain · fleet=one hero per window
 FLEET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fleet")
 FLEET_MAX = 8                      # max windows shown
-FLEET_ALIVE = 300                  # seconds; a session file older than this = dead, dropped
+FLEET_ALIVE = 120                  # seconds; stale files dropped (open windows refresh every ~1s)
 HERO_SLOTS = ("mario", "pika", "ghost", "goomba", "slime", "avatar", "robot", "alien")
 PIXELS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-pixels.txt")
 PIXELS = ("half", "sext")          # half = 1x2 px/cell (safe) · sext = 2x3 px/cell (finer, prettier)
@@ -925,9 +925,13 @@ def _fleet_read():
     now = int(time.time())
     ships = []
     for p, s in _fleet_all():
-        if now - s.get("ts", 0) > FLEET_ALIVE:
+        sid = s.get("session_id")
+        stale = now - s.get("ts", 0) > FLEET_ALIVE
+        # drop demo/unknown files and stale ones — but keep a pending needs-you
+        # visible (its own window's status line is hidden while the prompt is up)
+        if not sid or sid == "unknown" or (stale and s.get("state") != "needsyou"):
             try:
-                os.remove(p)          # session died without SessionEnd
+                os.remove(p)
             except Exception:
                 pass
             continue
@@ -943,8 +947,9 @@ def render_fleet(data):
     five = to_num(get(data, "rate_limits", "five_hour", "used_percentage"))
     seven = to_num(get(data, "rate_limits", "seven_day", "used_percentage"))
     cwd = get(data, "workspace", "current_dir") or get(data, "cwd")
-    _fleet_write(sid, {"ctx": ctx, "cost": cost, "five": five, "seven": seven,
-                       "dir": os.path.basename(cwd) if cwd else "?"})
+    if sid and sid != "unknown":        # don't let --demo / missing-id pollute the real fleet
+        _fleet_write(sid, {"ctx": ctx, "cost": cost, "five": five, "seven": seven,
+                           "dir": os.path.basename(cwd) if cwd else "?"})
     ships = _fleet_read()
     if not ships:
         ships = [{"session_id": sid, "hero": "mario", "ctx": ctx, "cost": cost, "state": "idle", "first_ts": 0}]
