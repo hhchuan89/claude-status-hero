@@ -968,12 +968,11 @@ def render_fleet(data):
     # Fleet always renders HALF-BLOCK, ignoring --set-pixels: at tiny fleet-hero
     # sizes, sextant's 2-colours-per-cell merges a sprite's body+legs into a
     # smear. Half-block keeps every pixel COLUMN its own colour → crisp sprites.
-    rows_scene = 7
-    PW = cols
+    rows_scene = 6
+    PW = max(24, cols - 2)          # small margin so the row can never wrap in the host terminal
     PH = rows_scene * 2
     baseY = PH - 1
     laneW = max(8, PW // n)
-    maxP = max(3, PH - 9)           # pillar height range (leaves room for the hero on top)
 
     def dim(c, f=0.4):
         return (int(c[0] * f), int(c[1] * f), int(c[2] * f))
@@ -986,24 +985,24 @@ def render_fleet(data):
         cx = i * laneW + laneW // 2
         cv = to_num(s.get("ctx")) or 0.0
         st = s.get("state", "idle")
-        ph = max(3, int(cv / 100.0 * maxP))
         pcol = zc(cv)
-        pw = max(5, min(9, laneW - 2))
-        # pillar = SOLID zone-coloured column (bright top edge, filled body)
-        px0 = cx - pw // 2
-        for yy in range(baseY - ph, baseY):
-            for xx in range(px0, px0 + pw):
-                if 0 <= yy < PH and 0 <= xx < PW:
-                    canvas[yy][xx] = pcol if yy == baseY - ph else dim(pcol, 0.78)
-        # hero on top of the pillar
         grid = HEROES.get(s.get("hero"), HEROES[DEFAULT_HERO])["a"]
         gh, gw = len(grid), len(grid[0])
-        hs = 1
-        bob = 2 if (st == "working" and step == 0) else 0
+        # clean short platform coloured by context zone — no tall pillar (that's
+        # what fragmented at odd widths); context reads from colour + the % text.
+        pw = max(6, min(11, laneW - 3))
+        px0 = cx - pw // 2
+        for yy in (baseY - 2, baseY - 1):
+            for xx in range(px0, px0 + pw):
+                if 0 <= yy < PH and 0 <= xx < PW:
+                    canvas[yy][xx] = pcol if yy == baseY - 2 else dim(pcol, 0.7)
+        # hero standing on the platform (working bobs, idle dims); no beacon —
+        # the status words below carry the state now.
+        bob = 1 if (st == "working" and step == 0) else 0
         bright = st != "idle"
-        topY = baseY - ph - gh * hs - bob
-        topY -= topY % 2            # align to half-block cell so the sprite doesn't smear
-        x0 = cx - (gw * hs) // 2
+        topY = max(0, (baseY - 2) - gh - bob)
+        topY -= topY % 2                                   # align to half-block cell (no smear)
+        x0 = cx - gw // 2
         for ry in range(gh):
             for rx in range(gw):
                 col = TCPAL.get(grid[ry][rx])
@@ -1011,28 +1010,9 @@ def render_fleet(data):
                     continue
                 if not bright:
                     col = dim(col)
-                for sy in range(hs):
-                    for sx in range(hs):
-                        yy, xx = topY + ry * hs + sy, x0 + rx * hs + sx
-                        if 0 <= yy < PH and 0 <= xx < PW:
-                            canvas[yy][xx] = col
-        # state beacon above the hero
-        by = max(1, topY - 2)
-
-        def put(ox, oy, col):
-            yy, xx = by + oy, cx + ox
-            if 0 <= yy < PH and 0 <= xx < PW:
-                canvas[yy][xx] = col
-        if st == "needsyou":
-            if step == 0:                                  # blinking amber "!"
-                put(0, -2, (255, 200, 50)); put(0, -1, (255, 200, 50)); put(0, 1, (255, 200, 50))
-        elif st == "working":
-            put(-1, 0, (60, 240, 255)); put(0, -1, (60, 240, 255)); put(1, 0, (60, 240, 255))
-        elif st == "error":
-            for ox, oy in ((-1, -1), (1, 1), (1, -1), (-1, 1), (0, 0)):
-                put(ox, oy, (255, 74, 77))
-        else:                                              # idle dot
-            put(0, 0, (120, 130, 155))
+                yy, xx = topY + ry, x0 + rx
+                if 0 <= yy < PH and 0 <= xx < PW:
+                    canvas[yy][xx] = col
         # YOU marker on the ground under this session
         if s.get("session_id") == sid:
             for xx in range(cx - 1, cx + 2):
