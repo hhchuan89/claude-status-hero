@@ -968,7 +968,7 @@ def render_fleet(data):
     # Fleet always renders HALF-BLOCK, ignoring --set-pixels: at tiny fleet-hero
     # sizes, sextant's 2-colours-per-cell merges a sprite's body+legs into a
     # smear. Half-block keeps every pixel COLUMN its own colour → crisp sprites.
-    rows_scene = 8
+    rows_scene = 7
     PW = cols
     PH = rows_scene * 2
     baseY = PH - 1
@@ -989,14 +989,12 @@ def render_fleet(data):
         ph = max(3, int(cv / 100.0 * maxP))
         pcol = zc(cv)
         pw = max(5, min(9, laneW - 2))
-        # pillar = neon-outlined column (bright top + sides, visible dim fill)
+        # pillar = SOLID zone-coloured column (bright top edge, filled body)
         px0 = cx - pw // 2
         for yy in range(baseY - ph, baseY):
             for xx in range(px0, px0 + pw):
-                if not (0 <= yy < PH and 0 <= xx < PW):
-                    continue
-                edge = yy == baseY - ph or xx == px0 or xx == px0 + pw - 1
-                canvas[yy][xx] = pcol if edge else dim(pcol, 0.5)
+                if 0 <= yy < PH and 0 <= xx < PW:
+                    canvas[yy][xx] = pcol if yy == baseY - ph else dim(pcol, 0.78)
         # hero on top of the pillar
         grid = HEROES.get(s.get("hero"), HEROES[DEFAULT_HERO])["a"]
         gh, gw = len(grid), len(grid[0])
@@ -1073,7 +1071,18 @@ def render_fleet(data):
         cells.append(" " * left + fg(zcol) + lab + RESET + " " * max(0, pad - left))
     metrics = "".join(cells)
 
-    return "\n".join([hud] + scene + [metrics]) + "\n"
+    # per-lane Claude status in words (below the context/cost row)
+    SW = {"working": ("working", 45), "needsyou": ("needs you", 214),
+          "idle": ("idle", 244), "error": ("error", 196)}
+    scells = []
+    for s in ships:
+        word, wc = SW.get(s.get("state", "idle"), ("idle", 244))
+        pad = fw - len(word)
+        left = max(0, pad // 2)
+        scells.append(" " * left + fg(wc) + word + RESET + " " * max(0, pad - left))
+    statusrow = "".join(scells)
+
+    return "\n".join([hud] + scene + [metrics, statusrow]) + "\n"
 
 
 # ---- CLI (hero picker) vs statusline (stdin) mode ----------------------------
