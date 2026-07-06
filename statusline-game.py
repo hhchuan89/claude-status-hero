@@ -93,6 +93,11 @@ _ANIMALS = {
 # one pose shared across a/b/jump (fleet + summit use 'a'; flat stays crash-safe)
 HEROES = {name: {"label": lbl, "a": g, "b": g, "jump": g} for name, (lbl, g) in _ANIMALS.items()}
 
+# The fleet uses real emoji (instantly recognisable, full-detail) instead of the
+# tiny pixel sprites; the pixel grids above are for the flat/summit single-hero scenes.
+HERO_EMOJI = {"fox": "🦊", "cat": "🐱", "frog": "🐸", "owl": "🦉",
+              "penguin": "🐧", "rabbit": "🐰", "bear": "🐻", "duck": "🦆"}
+
 # ---- detailed 12x16 hero for the summit scene (recognisable + a jump pose) ----
 # Only the plumber for now; other heroes fall back to their 7x8 grid.
 HERO_BIG = {
@@ -917,77 +922,28 @@ def render_fleet(data):
                            "dir": os.path.basename(cwd) if cwd else "?"})
     ships = _fleet_read()
     if not ships:
-        ships = [{"session_id": sid, "hero": "mario", "ctx": ctx, "cost": cost, "state": "idle", "first_ts": 0}]
+        ships = [{"session_id": sid, "hero": DEFAULT_HERO, "ctx": ctx, "cost": cost, "state": "idle", "first_ts": 0}]
     n = len(ships)
 
     try:
         cols = int(os.environ.get("COLUMNS") or 0)
     except Exception:
         cols = 0
-    cols = min(max(cols or 100, 40), 120)
+    cols = min(max(cols or 100, 40), 140)
     try:
         frame = int(os.environ.get("CLAUDE_SL_FRAME", int(time.time())))
     except Exception:
         frame = int(time.time())
     step = frame % 2
-    # Fleet always renders HALF-BLOCK, ignoring --set-pixels: at tiny fleet-hero
-    # sizes, sextant's 2-colours-per-cell merges a sprite's body+legs into a
-    # smear. Half-block keeps every pixel COLUMN its own colour → crisp sprites.
-    rows_scene = 6
-    laneW = max(9, min((cols - 4) // n, 18))   # compact lanes; whole bar stays well inside the terminal (no wrap)
-    PW = laneW * n
-    PH = rows_scene * 2
-    baseY = PH - 1
+    fw = max(9, (cols - 2) // n)         # per-lane field; total <= cols-2, so the row never wraps
 
-    def dim(c, f=0.4):
-        return (int(c[0] * f), int(c[1] * f), int(c[2] * f))
+    def zc256(v):
+        return 196 if v >= 90 else 214 if v >= 70 else 46
 
-    def zc(v):                          # distinct hues so pillars never blend into the ground
-        return (238, 70, 74) if v >= 90 else (240, 185, 55) if v >= 70 else (58, 200, 100)
-
-    canvas = [[None] * PW for _ in range(PH)]
-    for i, s in enumerate(ships):
-        cx = i * laneW + laneW // 2
-        cv = to_num(s.get("ctx")) or 0.0
-        st = s.get("state", "idle")
-        pcol = zc(cv)
-        grid = HEROES.get(s.get("hero"), HEROES[DEFAULT_HERO])["a"]
-        gh, gw = len(grid), len(grid[0])
-        # clean short platform coloured by context zone — no tall pillar (that's
-        # what fragmented at odd widths); context reads from colour + the % text.
-        pw = max(6, min(11, laneW - 3))
-        px0 = cx - pw // 2
-        for yy in (baseY - 2, baseY - 1):
-            for xx in range(px0, px0 + pw):
-                if 0 <= yy < PH and 0 <= xx < PW:
-                    canvas[yy][xx] = pcol if yy == baseY - 2 else dim(pcol, 0.7)
-        # hero standing on the platform (working bobs, idle dims); no beacon —
-        # the status words below carry the state now.
-        bob = 1 if (st == "working" and step == 0) else 0
-        bright = st != "idle"
-        topY = max(0, (baseY - 2) - gh - bob)
-        topY -= topY % 2                                   # align to half-block cell (no smear)
-        x0 = cx - gw // 2
-        for ry in range(gh):
-            for rx in range(gw):
-                col = TCPAL.get(grid[ry][rx])
-                if col is None:
-                    continue
-                if not bright:
-                    col = dim(col)
-                yy, xx = topY + ry, x0 + rx
-                if 0 <= yy < PH and 0 <= xx < PW:
-                    canvas[yy][xx] = col
-        # YOU marker on the ground under this session
-        if s.get("session_id") == sid:
-            for xx in range(cx - 1, cx + 2):
-                if 0 <= xx < PW:
-                    canvas[baseY][xx] = (33, 240, 180)
-    for xx in range(PW):                                   # dim neutral ground line (recedes)
-        if canvas[baseY][xx] is None:
-            canvas[baseY][xx] = (26, 40, 60)
-
-    scene = render_canvas_tc(canvas)
+    def cen(s, vis):                     # centre s (visible width `vis`) in an fw-wide field
+        pad = max(0, fw - vis)
+        left = pad // 2
+        return " " * left + s + " " * (pad - left)
 
     # HUD summary
     w = sum(1 for s in ships if s.get("state") == "working")
@@ -1001,33 +957,47 @@ def render_fleet(data):
     if seven is not None:
         hud += " %s· 7d %d%%%s" % (DIM, round(seven), RESET)
 
-    # per-lane metrics row (aligned to lanes): ctx% + $cost when there's room
-    term_w = PW
-    fw = max(4, term_w // n)
-    cells = []
+    # emoji hero (instantly recognisable). A WORKING window hops between the two
+    # rows; everyone else sits on the lower row.
+    top, bot = [], []
     for s in ships:
-        cv = round(to_num(s.get("ctx")) or 0.0)
-        _, zcol = zone(cv)
-        lab = "%d%%" % cv
-        if fw >= 8:
-            lab += " $%d" % round(to_num(s.get("cost")) or 0.0)
-        pad = fw - len(lab)
-        left = max(0, pad // 2)
-        cells.append(" " * left + fg(zcol) + lab + RESET + " " * max(0, pad - left))
-    metrics = "".join(cells)
+        em = HERO_EMOJI.get(s.get("hero"), "❓")
+        up = (s.get("state") == "working" and step == 0)
+        top.append(cen(em, 2) if up else cen("", 0))
+        bot.append(cen("", 0) if up else cen(em, 2))
+    herotop, herobot = "".join(top), "".join(bot)
 
-    # per-lane Claude status in words (below the context/cost row)
+    # context bar per lane (fill = context %, colour = zone)
+    barw = max(5, fw - 3)
+    bars = []
+    for s in ships:
+        cvv = round(to_num(s.get("ctx")) or 0.0)
+        f = max(0, min(barw, int(round(cvv / 100.0 * barw))))
+        bar = fg(zc256(cvv)) + "▓" * f + DIM + fg(238) + "░" * (barw - f) + RESET
+        bars.append(cen(bar, barw))
+    barrow = "".join(bars)
+
+    # context % + cost
+    mcells = []
+    for s in ships:
+        cvv = round(to_num(s.get("ctx")) or 0.0)
+        lab = "%d%% $%d" % (cvv, round(to_num(s.get("cost")) or 0.0))
+        mcells.append(cen(fg(zc256(cvv)) + lab + RESET, len(lab)))
+    metrics = "".join(mcells)
+
+    # status in words (needs-you blinks; the current window is underlined)
     SW = {"working": ("working", 45), "needsyou": ("needs you", 214),
           "idle": ("idle", 244), "error": ("error", 196)}
     scells = []
     for s in ships:
         word, wc = SW.get(s.get("state", "idle"), ("idle", 244))
-        pad = fw - len(word)
-        left = max(0, pad // 2)
-        scells.append(" " * left + fg(wc) + word + RESET + " " * max(0, pad - left))
+        if s.get("state") == "needsyou" and step == 1:
+            wc = 236
+        u = "\033[4m" if s.get("session_id") == sid else ""
+        scells.append(cen(u + fg(wc) + word + RESET, len(word)))
     statusrow = "".join(scells)
 
-    return "\n".join([hud] + scene + [metrics, statusrow]) + "\n"
+    return "\n".join([hud, herotop, herobot, barrow, metrics, statusrow]) + "\n"
 
 
 # ---- CLI (hero picker) vs statusline (stdin) mode ----------------------------
