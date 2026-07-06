@@ -31,7 +31,7 @@ import time
 import subprocess
 
 # ---- CONFIG (the knobs) ------------------------------------------------------
-DEFAULT_HERO = "mario"
+DEFAULT_HERO = "fox"
 MOTION = (os.environ.get("CLAUDE_SL_MOTION") or "usage").strip().lower()
 #   "usage" = stand at your 5h % (meaningful) ·  "march" = run left->right on the clock (fun)
 TRACK_MIN, TRACK_MAX = 22, 40      # ground-track width clamps (chars)
@@ -45,7 +45,7 @@ STYLES = ("flat", "summit", "fleet")   # flat=track · summit=mountain · fleet=
 FLEET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fleet")
 FLEET_MAX = 8                      # max windows shown
 FLEET_ALIVE = 120                  # seconds; stale files dropped (open windows refresh every ~1s)
-HERO_SLOTS = ("mario", "pika", "ghost", "goomba", "slime", "avatar", "robot", "alien")
+HERO_SLOTS = ("fox", "cat", "frog", "owl", "penguin", "rabbit", "bear", "duck")
 PIXELS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-pixels.txt")
 PIXELS = ("half", "sext")          # half = 1x2 px/cell (safe) · sext = 2x3 px/cell (finer, prettier)
 SIZE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-size.txt")
@@ -72,63 +72,26 @@ def fg(n):
     return "\033[38;5;%dm" % n
 
 
-# ---- hero roster (7 wide x 8 tall pixel grids). '.' = transparent. -----------
+# ---- hero roster: 8 animals, 7 wide x 8 tall pixel grids. '.' = transparent. --
 PAL = {
     "R": 196, "S": 223, "B": 94, "o": 20, "w": 231, "k": 16,
     "Y": 226, "C": 211, "G": 46, "c": 51, "g": 40, "m": 121,
-    "e": 250, "p": 141,
+    "e": 250, "p": 141, "O": 208, "x": 245,
 }
 
-HEROES = {
-    "mario": {
-        "label": "🍄 red-hat plumber",
-        "a": ["..RRR..", ".RRRRR.", ".BSSSk.", ".BSSSS.", ".RRRRR.", "wRRRRRw", ".ooooo.", "..B.B.."],
-        "b": ["..RRR..", ".RRRRR.", ".BSSSk.", ".BSSSS.", ".RRRRR.", "wRRRRRw", ".ooooo.", ".B...B."],
-        "jump": ["w.RRR.w", ".RRRRR.", ".BSSSk.", ".BSSSS.", ".RRRRR.", ".ooooo.", "..B.B..", "......."],
-    },
-    "pika": {
-        "label": "⚡ electric mouse",
-        "a": ["k.....k", "Yk...kY", ".YYYYY.", ".YkYkY.", "CYYYYYC", ".YYYYY.", ".Y...Y.", "..B.B.."],
-        "b": ["k.....k", "Yk...kY", ".YYYYY.", ".YkYkY.", "CYYYYYC", ".YYYYY.", ".Y...Y.", ".B...B."],
-        "jump": ["k.....k", "Yk.k.kY", ".YYYYY.", ".YkYkY.", "CYYYYYC", ".YYYYY.", "..YYY..", "......."],
-    },
-    "ghost": {
-        "label": "👻 cyan spook",
-        "a": ["..ccc..", ".ccccc.", "cckcckc", "ccccccc", "ccccccc", "ccccccc", "c.c.c.c", "......."],
-        "b": ["..ccc..", ".ccccc.", "cckcckc", "ccccccc", "ccccccc", "ccccccc", ".c.c.c.", "......."],
-        "jump": ["..ccc..", ".ccccc.", "cckcckc", "ccccccc", "ccccccc", "ccccccc", "ccccccc", "......."],
-    },
-    "goomba": {
-        "label": "🟤 angry mushroom",
-        "a": ["..BBB..", ".BBBBB.", "BBBBBBB", "BkBBBkB", "BBBBBBB", ".BBBBB.", "..w.w..", "......."],
-        "b": ["..BBB..", ".BBBBB.", "BBBBBBB", "BkBBBkB", "BBBBBBB", ".BBBBB.", ".w...w.", "......."],
-        "jump": ["..BBB..", ".BBBBB.", "BBBBBBB", "BkBBBkB", "BBBBBBB", ".BBBBB.", "..www..", "......."],
-    },
-    "slime": {
-        "label": "🟢 rpg blob",
-        "a": [".......", "..ggg..", ".ggggg.", "ggggggg", "gkgggkg", "ggggggg", "ggggggg", "......."],
-        "b": [".......", ".......", "..ggg..", ".ggggg.", "gkgggkg", "ggggggg", "ggggggg", "......."],
-        "jump": ["..ggg..", ".ggggg.", "ggggggg", "gkgggkg", "ggggggg", "ggggggg", ".ggggg.", "......."],
-    },
-    "avatar": {
-        "label": "🟩 your mint-green pixel face",
-        "a": [".mmmmm.", "mmmmmmm", "mkmmmkm", "mmmmmmm", "mmwwwmm", "mmmmmmm", ".mmmmm.", "......."],
-        "b": [".mmmmm.", "mmmmmmm", "mkmmmkm", "mmmmmmm", "mmmwmmm", "mmmmmmm", ".mmmmm.", "......."],
-        "jump": ["m.....m", ".mmmmm.", "mkmmmkm", "mmmmmmm", "mmwwwmm", "mmmmmmm", ".mmmmm.", "......."],
-    },
-    "robot": {
-        "label": "🤖 steel bot",
-        "a": ["...c...", "...e...", ".eeeee.", ".ekeke.", ".eeeee.", "eeeeeee", "e.e.e.e", ".e...e."],
-        "b": ["...c...", "...e...", ".eeeee.", ".ekeke.", ".eeeee.", "eeeeeee", "e.e.e.e", "e.....e"],
-        "jump": ["c..c..c", "...e...", ".eeeee.", ".ekeke.", ".eeeee.", "eeeeeee", ".e...e.", "......."],
-    },
-    "alien": {
-        "label": "👾 violet alien",
-        "a": ["..ppp..", ".ppppp.", "pkpppkp", ".ppppp.", ".ppppp.", "..ppp..", ".p...p.", ".p...p."],
-        "b": ["..ppp..", ".ppppp.", "pkpppkp", ".ppppp.", ".ppppp.", "..ppp..", ".p...p.", "p.....p"],
-        "jump": ["p.ppp.p", ".ppppp.", "pkpppkp", ".ppppp.", ".ppppp.", "..ppp..", ".p...p.", "......."],
-    },
+# distinct silhouette + colour per animal, so each reads at ~8px. IP-clean.
+_ANIMALS = {
+    "fox":     ("🦊 fox",     ["O.....O", "OO...OO", ".OOOOO.", ".OkOkO.", ".OwwwO.", "..OkO..", ".O...O.", ".OO.OO."]),
+    "cat":     ("🐱 cat",     [".x...x.", "xxx.xxx", ".xxxxx.", ".xkxkx.", ".xxCxx.", "k.xxx.k", ".x...x.", ".xx.xx."]),
+    "frog":    ("🐸 frog",    ["gk...kg", ".ggggg.", ".ggggg.", ".gkkkg.", ".ggggg.", "g.....g", ".g...g.", ".gg.gg."]),
+    "owl":     ("🦉 owl",     ["B.....B", "BB...BB", ".BBBBB.", ".wkwkw.", ".BYYYB.", ".BBBBB.", ".B.B.B.", ".BB.BB."]),
+    "penguin": ("🐧 penguin", ["..kkk..", ".kkkkk.", ".kkwkk.", "kwwwwwk", "kwwwwwk", "kwwwwwk", ".k...k.", ".O...O."]),
+    "rabbit":  ("🐰 rabbit",  ["..w.w..", "..w.w..", "..w.w..", ".wwwww.", ".wkwkw.", ".wwCww.", ".wwwww.", ".w...w."]),
+    "bear":    ("🐻 bear",    ["BB...BB", "BBB.BBB", ".BBBBB.", ".BkBkB.", ".BSSSB.", ".BBkBB.", ".BBBBB.", ".BB.BB."]),
+    "duck":    ("🦆 duck",    ["..YYY..", ".YkYYY.", "OOYYYY.", ".YYYYY.", ".YYYYY.", ".YYYYY.", ".Y...Y.", ".O.O..."]),
 }
+# one pose shared across a/b/jump (fleet + summit use 'a'; flat stays crash-safe)
+HEROES = {name: {"label": lbl, "a": g, "b": g, "jump": g} for name, (lbl, g) in _ANIMALS.items()}
 
 # ---- detailed 12x16 hero for the summit scene (recognisable + a jump pose) ----
 # Only the plumber for now; other heroes fall back to their 7x8 grid.
@@ -503,7 +466,7 @@ TCPAL = {
     "R": (229, 49, 43), "S": (244, 201, 154), "B": (138, 90, 18), "o": (35, 64, 200),
     "w": (245, 247, 251), "k": (24, 24, 28), "Y": (245, 197, 24), "C": (255, 143, 176),
     "c": (31, 212, 212), "g": (55, 194, 90), "m": (116, 224, 190),
-    "e": (159, 176, 200), "p": (180, 124, 255),
+    "e": (159, 176, 200), "p": (180, 124, 255), "O": (240, 140, 40), "x": (150, 150, 150),
 }
 
 
@@ -907,6 +870,8 @@ def _fleet_write(sid, updates, state=None):
     now = int(time.time())
     if not s:
         s = {"session_id": sid, "first_ts": now, "hero": _pick_hero(), "state": "idle", "state_ts": now}
+    elif s.get("hero") not in HEROES:
+        s["hero"] = _pick_hero()        # migrate a retired hero (e.g. mario) to a current one
     s.update(updates)
     s["ts"] = now
     if state is not None:
@@ -969,10 +934,10 @@ def render_fleet(data):
     # sizes, sextant's 2-colours-per-cell merges a sprite's body+legs into a
     # smear. Half-block keeps every pixel COLUMN its own colour → crisp sprites.
     rows_scene = 6
-    PW = max(24, cols - 2)          # small margin so the row can never wrap in the host terminal
+    laneW = max(9, min((cols - 4) // n, 18))   # compact lanes; whole bar stays well inside the terminal (no wrap)
+    PW = laneW * n
     PH = rows_scene * 2
     baseY = PH - 1
-    laneW = max(8, PW // n)
 
     def dim(c, f=0.4):
         return (int(c[0] * f), int(c[1] * f), int(c[2] * f))
