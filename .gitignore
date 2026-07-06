@@ -2,13 +2,9 @@
 __pycache__/
 *.pyc
 
-# Per-user runtime state (created by --set-* commands, next to the script)
-statusline-hero.txt
-statusline-style.txt
-statusline-pixels.txt
-statusline-size.txt
-statusline-theme.txt
+# One-shot render exports (previews are committed as .svg only)
+*.pdf
+*.html
 
-# Local backups
-*.backup-*.py
-*.daylight-backup.py
+# Local settings backups
+*.status-hero-backup-*
