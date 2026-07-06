@@ -965,13 +965,15 @@ def render_fleet(data):
     except Exception:
         frame = int(time.time())
     step = frame % 2
-    sext = resolve_pixels() == "sext"
-    rows_scene = 6
-    PW = cols * 2 if sext else cols
-    PH = rows_scene * 3 if sext else rows_scene * 2
+    # Fleet always renders HALF-BLOCK, ignoring --set-pixels: at tiny fleet-hero
+    # sizes, sextant's 2-colours-per-cell merges a sprite's body+legs into a
+    # smear. Half-block keeps every pixel COLUMN its own colour → crisp sprites.
+    rows_scene = 8
+    PW = cols
+    PH = rows_scene * 2
     baseY = PH - 1
-    laneW = max(6, PW // n)
-    maxP = int(PH * 0.5)
+    laneW = max(8, PW // n)
+    maxP = max(3, PH - 9)           # pillar height range (leaves room for the hero on top)
 
     def dim(c, f=0.4):
         return (int(c[0] * f), int(c[1] * f), int(c[2] * f))
@@ -984,21 +986,25 @@ def render_fleet(data):
         cx = i * laneW + laneW // 2
         cv = to_num(s.get("ctx")) or 0.0
         st = s.get("state", "idle")
-        ph = max(3, int(cv / 100.0 * maxP))
+        ph = max(2, int(cv / 100.0 * maxP))
         pcol = zc(cv)
-        pw = max(4, int(laneW * 0.5))
-        # pillar (context height): dim fill + bright neon top edge
+        pw = max(5, min(9, laneW - 2))
+        # pillar = neon-outlined column (bright top + sides, visible dim fill)
+        px0 = cx - pw // 2
         for yy in range(baseY - ph, baseY):
-            for xx in range(cx - pw // 2, cx - pw // 2 + pw):
-                if 0 <= yy < PH and 0 <= xx < PW:
-                    canvas[yy][xx] = pcol if yy == baseY - ph else dim(pcol, 0.28)
+            for xx in range(px0, px0 + pw):
+                if not (0 <= yy < PH and 0 <= xx < PW):
+                    continue
+                edge = yy == baseY - ph or xx == px0 or xx == px0 + pw - 1
+                canvas[yy][xx] = pcol if edge else dim(pcol, 0.5)
         # hero on top of the pillar
         grid = HEROES.get(s.get("hero"), HEROES[DEFAULT_HERO])["a"]
         gh, gw = len(grid), len(grid[0])
-        hs = max(1, min((laneW - 2) // gw, int(PH * 0.5) // gh))
+        hs = 1
         bob = 2 if (st == "working" and step == 0) else 0
         bright = st != "idle"
         topY = baseY - ph - gh * hs - bob
+        topY -= topY % 2            # align to half-block cell so the sprite doesn't smear
         x0 = cx - (gw * hs) // 2
         for ry in range(gh):
             for rx in range(gw):
@@ -1038,7 +1044,7 @@ def render_fleet(data):
         if canvas[baseY][xx] is None:
             canvas[baseY][xx] = (24, 120, 120)
 
-    scene = render_sextant(canvas) if sext else render_canvas_tc(canvas)
+    scene = render_canvas_tc(canvas)
 
     # HUD summary
     w = sum(1 for s in ships if s.get("state") == "working")
@@ -1053,7 +1059,7 @@ def render_fleet(data):
         hud += " %s· 7d %d%%%s" % (DIM, round(seven), RESET)
 
     # per-lane metrics row (aligned to lanes): ctx% + $cost when there's room
-    term_w = PW // 2 if sext else PW
+    term_w = PW
     fw = max(4, term_w // n)
     cells = []
     for s in ships:
