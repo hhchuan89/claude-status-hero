@@ -12,10 +12,14 @@ Modes (first argument):
   --hook EVENT    hook handler: update this session's state file, print nothing
   --install       register statusline + hooks in ~/.claude/settings.json
   --uninstall     remove our entries (a timestamped backup is written either way)
-  --style X       switch statusline style: `gauge` (3 lines, default) or
-                  `fleet` (10 lines: HUD + 5h track + static fleet scene with
-                  one pixel-art hero per live session; needs hero_board.py
-                  next to this file; sets statusLine.refreshInterval=2)
+  --style X       statusline style, persisted in config.json:
+                    gauge  3 lines: HUD + 5h track + meters (default)
+                    list   7 lines: gauge + one compact fleet row per session
+                           (emoji hero, state, activity, ctx bar, cost)
+                    fleet  10 lines: HUD + 5h track + static pixel-art scene
+                           (needs hero_board.py next to this file)
+                  list/fleet set statusLine.refreshInterval=2 so other
+                  windows' states stay fresh; gauge removes it
   --demo          print sample renders (no Claude Code needed)
   --simulate      animate a fake session in your terminal (for GIF capture)
   --doctor        print alignment/color diagnostics for your terminal
@@ -473,7 +477,8 @@ def render(data, width=None):
     line2 = crop_pad(label + track(five, track_w, hero) + tail, W)
 
     # ---- fleet style: full static fleet scene instead of L3 ----
-    if load_config().get("style") == "fleet":
+    style = load_config().get("style")
+    if style == "fleet":
         return "\n".join([line1, line2] + fleet_lines(sessions, sid, W))
 
     # ---- L3: meters + fleet ----
@@ -493,6 +498,11 @@ def render(data, width=None):
         if disp_width(cand) <= W:
             break
     line3 = crop_pad(cand, W)
+
+    # ---- list style: gauge + LIST_LANES compact fleet rows in between ----
+    if style == "list":
+        return "\n".join([line1, line2] + list_lines(sessions, sid, W)
+                         + [line3])
 
     return "\n".join((line1, line2, line3))
 
@@ -634,6 +644,63 @@ def fleet_lines(sessions, own_sid, W):
             line += DIM + " +%d" % extra + RESET
         out.append(crop_pad(line, W))
     return out
+
+
+# ------------------------------------------------------------- list style
+
+LIST_LANES = 4
+
+
+def list_lines(sessions, own_sid, W):
+    """Compact fleet: EXACTLY LIST_LANES rows, one session per row.
+    Own session is always visible; blank rows keep the height constant."""
+    now = time.time()
+    live = [s for s in sessions if now - (num(s.get("ts")) or 0) < 2 * 3600]
+    live.sort(key=lambda s: num(s.get("started_at")) or num(s.get("ts")) or 0)
+    me = next((s for s in live if s.get("sid") == str(own_sid)), None)
+    lanes = live[:LIST_LANES]
+    if me is not None and me not in lanes:
+        lanes[-1] = me
+    extra = max(0, len(live) - len(lanes))
+
+    rows = []
+    for i, s in enumerate(lanes):
+        if extra and i == len(lanes) - 1:
+            suffix = " +%d" % extra
+            row = list_row(s, own_sid, W - len(suffix)) + DIM + suffix + RESET
+        else:
+            row = list_row(s, own_sid, W)
+        rows.append(crop_pad(row, W))
+    if not rows:
+        rows.append(crop_pad(DIM + "  no fleet yet — open more Claude Code"
+                             " windows" + RESET, W))
+    while len(rows) < LIST_LANES:
+        rows.append(crop_pad("", W))
+    return rows
+
+
+def list_row(s, own_sid, W):
+    st = effective_state(s)
+    glyph, col, label = STATE_GLYPHS.get(st, STATE_GLYPHS["idle"])
+    ctx = num(s.get("ctx"))
+    name_w = 14 if W >= 80 else 11
+    bar_w = 6 if W >= 80 else 4
+    own = s.get("sid") == str(own_sid)
+
+    name = sanitize(s.get("dir") or "?", name_w)
+    name_cell = crop_pad((CYAN if own else "") + BOLD + name + RESET, name_w)
+    state_cell = crop_pad(col + (BOLD if st == "needs_you" else "")
+                          + label + RESET, 10)
+    right = (bar(ctx, bar_w) + " " + zone(ctx) + "%4s" % pct_txt(ctx) + RESET
+             + DIM + " $%4.0f" % (num(s.get("cost")) or 0) + RESET)
+    prefix = (hero_glyph(s.get("hero") or "fox") + " " + name_cell + " "
+              + col + glyph + RESET + " " + state_cell + " ")
+    act_w = W - disp_width(prefix) - disp_width(right) - 1
+    if act_w >= 6:
+        act = crop_pad(GRAY + sanitize(s.get("activity") or "", act_w)
+                       + RESET, act_w)
+        return prefix + act + " " + right
+    return prefix + right
 
 
 def fleet_summary(sessions, own_sid):
@@ -925,24 +992,25 @@ def main(argv):
     if "--style" in argv:
         i = argv.index("--style")
         val = argv[i + 1] if i + 1 < len(argv) else ""
-        if val not in ("fleet", "gauge"):
-            print("usage: --style fleet|gauge")
+        if val not in ("fleet", "gauge", "list"):
+            print("usage: --style gauge|list|fleet")
             return 1
         save_config({"style": val})
         path = settings_file(argv)
         data = load_json(path) or {}
         sl = data.get("statusLine")
         if isinstance(sl, dict) and MARK in (sl.get("command") or ""):
-            if val == "fleet":
+            if val in ("fleet", "list"):
                 sl["refreshInterval"] = 2   # keep other windows' states fresh
             else:
                 sl.pop("refreshInterval", None)
             atomic_write_pretty(path, data)
             print("statusLine.refreshInterval %s in %s"
-                  % ("→ 2s" if val == "fleet" else "removed", path))
-        print("style → %s  (%s)" % (val,
-              "10 lines: HUD + 5h track + static fleet scene" if val == "fleet"
-              else "3 lines: HUD + 5h track + meters"))
+                  % ("→ 2s" if val in ("fleet", "list") else "removed", path))
+        desc = {"gauge": "3 lines: HUD + 5h track + meters",
+                "list": "7 lines: gauge + one compact row per session",
+                "fleet": "10 lines: HUD + 5h track + static fleet scene"}
+        print("style → %s  (%s)" % (val, desc[val]))
         print("takes effect on the next statusline refresh.")
         return 0
     if "--install" in argv:
@@ -972,7 +1040,7 @@ def main(argv):
         sys.stdout.write(render(data) + "\n")
     except Exception:
         try:
-            n = 10 if load_config().get("style") == "fleet" else 3
+            n = {"fleet": 10, "list": 7}.get(load_config().get("style"), 3)
         except Exception:
             n = 3
         sys.stdout.write("status-hero\n(render error — run --doctor)\n"

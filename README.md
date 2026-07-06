@@ -59,17 +59,20 @@ ctx ████████░░░░ 64% 128/200k · 7d █████░�
 ### Want the fleet *inside* the statusline?
 
 ```bash
-python3 hero_line.py --style fleet    # ← the board's scene, statically, 10 lines
+python3 hero_line.py --style list     # 7 lines: gauge + one row per session
+python3 hero_line.py --style fleet    # 10 lines: the board's pixel scene, static
 python3 hero_line.py --style gauge    # back to the 3-line default
 ```
 
-`fleet` style replaces line 3 with a static render of the whole fleet scene —
-one pixel-art hero per live session, ctx bar, state, cost, your own window
-highlighted. Two honest trade-offs (physics, not laziness): it costs **10
-rows** in every window, and there's **no animation** — the statusline only
-re-renders when Claude Code asks (we set `refreshInterval: 2` so other
-windows' states stay fresh; beacons are steady, not blinking). The animated
-version is and stays `hero_board.py` in its own pane.
+`list` is the sweet spot for many windows: the 3 gauge lines plus up to four
+compact fleet rows (emoji hero, state, live activity, ctx bar, cost — your
+own window highlighted, always visible, `+N` overflow, blank rows pad so the
+height never changes). `fleet` renders the full pixel-art scene instead.
+Honest trade-offs (physics, not laziness): extra rows in every window, and
+**no animation** — the statusline only re-renders when Claude Code asks
+(list/fleet set `refreshInterval: 2` so other windows' states stay fresh;
+beacons are steady, not blinking). The animated version is and stays
+`hero_board.py` in its own pane.
 
 ## The board (fleet dashboard)
 

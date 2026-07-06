@@ -397,6 +397,52 @@ lines = [ln for ln in p.stdout.split("\n") if ln != ""]
 check("fleet empty fleet 10 lines", len(lines) == 10, "got %d" % len(lines))
 check("fleet empty fleet message", "no fleet yet" in ANSI.sub("", p.stdout))
 
+# list style: 7 lines, own session forced visible, overflow marker
+print("== list style ==")
+
+
+def list_dir(n_sessions):
+    d = os.path.join(tempfile.mkdtemp(prefix="sh-lst-"), "state")
+    os.makedirs(os.path.join(d, "sessions"))
+    with open(os.path.join(d, "config.json"), "w") as f:
+        json.dump({"style": "list"}, f)
+    t = time.time()
+    heroes = ["fox", "cat", "frog", "owl", "penguin", "rabbit"]
+    for i in range(n_sessions):
+        sid = "ls%d" % i
+        dn = "深度研究项目" if i == 1 else "proj-%d" % i
+        with open(os.path.join(d, "sessions", sid + ".json"), "w") as f:
+            json.dump({"sid": sid, "dir": dn, "hero": heroes[i % 6],
+                       "state": "working", "state_ts": t, "ts": t,
+                       "started_at": t - 100 + i, "ctx": 20 + i * 10,
+                       "cost": 2.0, "activity": "Bash: task %d" % i}, f)
+    return d
+
+
+for cols in ("60", "100", "200"):
+    for n in (0, 2, 6):
+        for ename, ev in (("default", {}), ("ascii", {"STATUS_HERO_ASCII": "1"})):
+            tag = "list n=%d/%s/cols=%s" % (n, ename, cols)
+            env = dict(ev)
+            env["_dir"] = list_dir(n)
+            p = run(LINE, stdin=payload(session_id="ls5",
+                                        workspace={"current_dir": "/tmp/own-proj"}),
+                    env_extra=env, cols=cols)
+            lines = [ln for ln in p.stdout.split("\n") if ln != ""]
+            check(tag + " exit0", p.returncode == 0, p.stderr[:200])
+            check(tag + " 7 lines", len(lines) == 7, "got %d" % len(lines))
+            exp_w = max(40, min(int(cols) - 2, 100))
+            widths = [disp_width(ln) for ln in lines]
+            check(tag + " width==%d" % exp_w, widths == [exp_w] * 7,
+                  "got %s" % sorted(set(widths)))
+            plain = ANSI.sub("", p.stdout)
+            if n == 6:
+                # ls5 (own, started last of 6 live) must still be visible;
+                # the render persists its dir as own-proj from the payload
+                check(tag + " own visible", "own-proj" in plain)
+                check(tag + " overflow marker", re.search(r"\+\d", plain),
+                      plain[:120])
+
 # --style CLI wiring
 tmp3 = tempfile.mkdtemp(prefix="sh-style-")
 sp3 = os.path.join(tmp3, "settings.json")
