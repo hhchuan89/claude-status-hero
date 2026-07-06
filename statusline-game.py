@@ -978,15 +978,15 @@ def render_fleet(data):
     def dim(c, f=0.4):
         return (int(c[0] * f), int(c[1] * f), int(c[2] * f))
 
-    def zc(v):
-        return (255, 74, 77) if v >= 90 else (255, 190, 60) if v >= 70 else (60, 240, 255)
+    def zc(v):                          # distinct hues so pillars never blend into the ground
+        return (238, 70, 74) if v >= 90 else (240, 185, 55) if v >= 70 else (58, 200, 100)
 
     canvas = [[None] * PW for _ in range(PH)]
     for i, s in enumerate(ships):
         cx = i * laneW + laneW // 2
         cv = to_num(s.get("ctx")) or 0.0
         st = s.get("state", "idle")
-        ph = max(2, int(cv / 100.0 * maxP))
+        ph = max(3, int(cv / 100.0 * maxP))
         pcol = zc(cv)
         pw = max(5, min(9, laneW - 2))
         # pillar = neon-outlined column (bright top + sides, visible dim fill)
@@ -1040,9 +1040,9 @@ def render_fleet(data):
             for xx in range(cx - 1, cx + 2):
                 if 0 <= xx < PW:
                     canvas[baseY][xx] = (33, 240, 180)
-    for xx in range(PW):                                   # neon grid ground
+    for xx in range(PW):                                   # dim neutral ground line (recedes)
         if canvas[baseY][xx] is None:
-            canvas[baseY][xx] = (24, 120, 120)
+            canvas[baseY][xx] = (26, 40, 60)
 
     scene = render_canvas_tc(canvas)
 
