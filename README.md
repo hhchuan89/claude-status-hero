@@ -10,13 +10,19 @@ A tiny **pixel-art game scene rendered live inside the Claude Code status line**
 
 | Toggle | Options | What it changes |
 |---|---|---|
-| `--set-style` | `flat` · `summit` | Side-scroller track, or a mountain climb |
+| `--set-style` | `flat` · `summit` · `fleet` | Side-scroller · mountain climb · **one hero per open window** |
 | `--set-theme` | `day` · `cyber` | Painted daylight sky, or a black-bg neon **synthwave** look |
 | `--set` (hero) | `mario` `pika` `ghost` `goomba` `slime` `avatar` | Which character |
 | `--set-pixels` | `half` · `sext` | Pixel density (sextant = 3× finer, needs a modern font) |
 | `--set-size` | `small` · `medium` · `large` | Scene height |
 
 Everything below the scene is real data: **5h / 7d rate-limit windows**, **context %**, session time, cost, and a coin tally — colour-coded green → yellow → red.
+
+### Fleet mode — monitor every window at once
+
+`--set-style fleet` turns the status line into a mission-control row: **each open Claude Code window is a distinct hero** (left→right, up to 8), standing on a **pillar sized by its context %**, with a **state beacon** above (⚡ working · ❗ needs-you (blinks) · 💤 idle · ⛔ error). Your own window is flagged **▲YOU**, and a HUD line summarises the whole fleet (`4/8 · ⚡2 · ❗1 · Σ$78 · 5h 76%`).
+
+It works because each window writes a tiny `~/.claude/fleet/<session_id>.json` on every render, and **every** window reads the whole folder — so any window shows the entire fleet, no separate app needed. **State needs hooks** (registered in `settings.json`): `UserPromptSubmit`→working, `Stop`→idle, `Notification`(permission/needs-input)→needs-you, `SessionEnd`→removes the lane. Without hooks you still get metrics; heroes just stay idle. Note: 5h/7d limits are per-*account* (shared by all windows), so they live in the HUD once — each hero carries **context, cost, and state**.
 
 ## Install
 

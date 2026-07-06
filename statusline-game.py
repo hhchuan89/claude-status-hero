@@ -41,7 +41,11 @@ SCENE_PX = 12                      # summit style: scene height in px (even; 12 
 MIN_PEAK = 2                       # summit style: min mountain height so it's never flat
 HERO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-hero.txt")
 STYLE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-style.txt")
-STYLES = ("flat", "summit")        # flat = side-scroll track · summit = climb a context-mountain
+STYLES = ("flat", "summit", "fleet")   # flat=track · summit=mountain · fleet=one hero per window
+FLEET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fleet")
+FLEET_MAX = 8                      # max windows shown
+FLEET_ALIVE = 300                  # seconds; a session file older than this = dead, dropped
+HERO_SLOTS = ("mario", "pika", "ghost", "goomba", "slime", "avatar", "robot", "alien")
 PIXELS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-pixels.txt")
 PIXELS = ("half", "sext")          # half = 1x2 px/cell (safe) · sext = 2x3 px/cell (finer, prettier)
 SIZE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-size.txt")
@@ -72,6 +76,7 @@ def fg(n):
 PAL = {
     "R": 196, "S": 223, "B": 94, "o": 20, "w": 231, "k": 16,
     "Y": 226, "C": 211, "G": 46, "c": 51, "g": 40, "m": 121,
+    "e": 250, "p": 141,
 }
 
 HEROES = {
@@ -110,6 +115,18 @@ HEROES = {
         "a": [".mmmmm.", "mmmmmmm", "mkmmmkm", "mmmmmmm", "mmwwwmm", "mmmmmmm", ".mmmmm.", "......."],
         "b": [".mmmmm.", "mmmmmmm", "mkmmmkm", "mmmmmmm", "mmmwmmm", "mmmmmmm", ".mmmmm.", "......."],
         "jump": ["m.....m", ".mmmmm.", "mkmmmkm", "mmmmmmm", "mmwwwmm", "mmmmmmm", ".mmmmm.", "......."],
+    },
+    "robot": {
+        "label": "🤖 steel bot",
+        "a": ["...c...", "...e...", ".eeeee.", ".ekeke.", ".eeeee.", "eeeeeee", "e.e.e.e", ".e...e."],
+        "b": ["...c...", "...e...", ".eeeee.", ".ekeke.", ".eeeee.", "eeeeeee", "e.e.e.e", "e.....e"],
+        "jump": ["c..c..c", "...e...", ".eeeee.", ".ekeke.", ".eeeee.", "eeeeeee", ".e...e.", "......."],
+    },
+    "alien": {
+        "label": "👾 violet alien",
+        "a": ["..ppp..", ".ppppp.", "pkpppkp", ".ppppp.", ".ppppp.", "..ppp..", ".p...p.", ".p...p."],
+        "b": ["..ppp..", ".ppppp.", "pkpppkp", ".ppppp.", ".ppppp.", "..ppp..", ".p...p.", "p.....p"],
+        "jump": ["p.ppp.p", ".ppppp.", "pkpppkp", ".ppppp.", ".ppppp.", "..ppp..", ".p...p.", "......."],
     },
 }
 
@@ -486,6 +503,7 @@ TCPAL = {
     "R": (229, 49, 43), "S": (244, 201, 154), "B": (138, 90, 18), "o": (35, 64, 200),
     "w": (245, 247, 251), "k": (24, 24, 28), "Y": (245, 197, 24), "C": (255, 143, 176),
     "c": (31, 212, 212), "g": (55, 194, 90), "m": (116, 224, 190),
+    "e": (159, 176, 200), "p": (180, 124, 255),
 }
 
 
@@ -832,6 +850,221 @@ def render_summit(data, hero):
     return "\n".join(out) + "\n"
 
 
+# ---- FLEET style: one hero per Claude Code window ----------------------------
+# Each session writes ~/.claude/fleet/<session_id>.json every render (+ on hooks
+# for state). Every window reads the whole folder and draws the full row, so any
+# window shows the entire fleet. State (working/idle/needsyou/error) comes from
+# hooks; metrics (ctx/cost/5h/7d) from the render. Dead sessions age out (TTL).
+def _fleet_dir():
+    try:
+        os.makedirs(FLEET_DIR, exist_ok=True)
+    except Exception:
+        pass
+    return FLEET_DIR
+
+
+def _fleet_path(sid):
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", sid or "unknown")[:80]
+    return os.path.join(_fleet_dir(), safe + ".json")
+
+
+def _fleet_load(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def _fleet_all():
+    out = []
+    try:
+        files = os.listdir(_fleet_dir())
+    except Exception:
+        files = []
+    for fn in files:
+        if fn.endswith(".json"):
+            p = os.path.join(FLEET_DIR, fn)
+            s = _fleet_load(p)
+            if s:
+                out.append((p, s))
+    return out
+
+
+def _pick_hero():
+    claimed = set(s.get("hero") for _, s in _fleet_all())
+    for h in HERO_SLOTS:
+        if h not in claimed:
+            return h
+    return HERO_SLOTS[0]
+
+
+def _fleet_write(sid, updates, state=None):
+    """Merge updates into this session's file. state (if given) is set by a hook."""
+    path = _fleet_path(sid)
+    s = _fleet_load(path) or {}
+    now = int(time.time())
+    if not s:
+        s = {"session_id": sid, "first_ts": now, "hero": _pick_hero(), "state": "idle", "state_ts": now}
+    s.update(updates)
+    s["ts"] = now
+    if state is not None:
+        s["state"] = state
+        s["state_ts"] = now
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(s, f)
+    except Exception:
+        pass
+    return s
+
+
+def _fleet_read():
+    """Alive sessions, sorted by open order, capped; drops dead files."""
+    now = int(time.time())
+    ships = []
+    for p, s in _fleet_all():
+        if now - s.get("ts", 0) > FLEET_ALIVE:
+            try:
+                os.remove(p)          # session died without SessionEnd
+            except Exception:
+                pass
+            continue
+        ships.append(s)
+    ships.sort(key=lambda s: s.get("first_ts", 0))
+    return ships[:FLEET_MAX]
+
+
+def render_fleet(data):
+    sid = get(data, "session_id") or "unknown"
+    ctx = to_num(get(data, "context_window", "used_percentage")) or 0.0
+    cost = to_num(get(data, "cost", "total_cost_usd")) or 0.0
+    five = to_num(get(data, "rate_limits", "five_hour", "used_percentage"))
+    seven = to_num(get(data, "rate_limits", "seven_day", "used_percentage"))
+    cwd = get(data, "workspace", "current_dir") or get(data, "cwd")
+    _fleet_write(sid, {"ctx": ctx, "cost": cost, "five": five, "seven": seven,
+                       "dir": os.path.basename(cwd) if cwd else "?"})
+    ships = _fleet_read()
+    if not ships:
+        ships = [{"session_id": sid, "hero": "mario", "ctx": ctx, "cost": cost, "state": "idle", "first_ts": 0}]
+    n = len(ships)
+
+    try:
+        cols = int(os.environ.get("COLUMNS") or 0)
+    except Exception:
+        cols = 0
+    cols = min(max(cols or 100, 40), 120)
+    try:
+        frame = int(os.environ.get("CLAUDE_SL_FRAME", int(time.time())))
+    except Exception:
+        frame = int(time.time())
+    step = frame % 2
+    sext = resolve_pixels() == "sext"
+    rows_scene = 6
+    PW = cols * 2 if sext else cols
+    PH = rows_scene * 3 if sext else rows_scene * 2
+    baseY = PH - 1
+    laneW = max(6, PW // n)
+    maxP = int(PH * 0.5)
+
+    def dim(c, f=0.4):
+        return (int(c[0] * f), int(c[1] * f), int(c[2] * f))
+
+    def zc(v):
+        return (255, 74, 77) if v >= 90 else (255, 190, 60) if v >= 70 else (60, 240, 255)
+
+    canvas = [[None] * PW for _ in range(PH)]
+    for i, s in enumerate(ships):
+        cx = i * laneW + laneW // 2
+        cv = to_num(s.get("ctx")) or 0.0
+        st = s.get("state", "idle")
+        ph = max(3, int(cv / 100.0 * maxP))
+        pcol = zc(cv)
+        pw = max(4, int(laneW * 0.5))
+        # pillar (context height): dim fill + bright neon top edge
+        for yy in range(baseY - ph, baseY):
+            for xx in range(cx - pw // 2, cx - pw // 2 + pw):
+                if 0 <= yy < PH and 0 <= xx < PW:
+                    canvas[yy][xx] = pcol if yy == baseY - ph else dim(pcol, 0.28)
+        # hero on top of the pillar
+        grid = HEROES.get(s.get("hero"), HEROES[DEFAULT_HERO])["a"]
+        gh, gw = len(grid), len(grid[0])
+        hs = max(1, min((laneW - 2) // gw, int(PH * 0.5) // gh))
+        bob = 2 if (st == "working" and step == 0) else 0
+        bright = st != "idle"
+        topY = baseY - ph - gh * hs - bob
+        x0 = cx - (gw * hs) // 2
+        for ry in range(gh):
+            for rx in range(gw):
+                col = TCPAL.get(grid[ry][rx])
+                if col is None:
+                    continue
+                if not bright:
+                    col = dim(col)
+                for sy in range(hs):
+                    for sx in range(hs):
+                        yy, xx = topY + ry * hs + sy, x0 + rx * hs + sx
+                        if 0 <= yy < PH and 0 <= xx < PW:
+                            canvas[yy][xx] = col
+        # state beacon above the hero
+        by = max(1, topY - 2)
+
+        def put(ox, oy, col):
+            yy, xx = by + oy, cx + ox
+            if 0 <= yy < PH and 0 <= xx < PW:
+                canvas[yy][xx] = col
+        if st == "needsyou":
+            if step == 0:                                  # blinking amber "!"
+                put(0, -2, (255, 200, 50)); put(0, -1, (255, 200, 50)); put(0, 1, (255, 200, 50))
+        elif st == "working":
+            put(-1, 0, (60, 240, 255)); put(0, -1, (60, 240, 255)); put(1, 0, (60, 240, 255))
+        elif st == "error":
+            for ox, oy in ((-1, -1), (1, 1), (1, -1), (-1, 1), (0, 0)):
+                put(ox, oy, (255, 74, 77))
+        else:                                              # idle dot
+            put(0, 0, (120, 130, 155))
+        # YOU marker on the ground under this session
+        if s.get("session_id") == sid:
+            for xx in range(cx - 1, cx + 2):
+                if 0 <= xx < PW:
+                    canvas[baseY][xx] = (33, 240, 180)
+    for xx in range(PW):                                   # neon grid ground
+        if canvas[baseY][xx] is None:
+            canvas[baseY][xx] = (24, 120, 120)
+
+    scene = render_sextant(canvas) if sext else render_canvas_tc(canvas)
+
+    # HUD summary
+    w = sum(1 for s in ships if s.get("state") == "working")
+    ny = sum(1 for s in ships if s.get("state") == "needsyou")
+    idl = sum(1 for s in ships if s.get("state") == "idle")
+    tot = sum((to_num(s.get("cost")) or 0.0) for s in ships)
+    hud = "%sFLEET%s %d/%d  %s⚡%d%s %s❗%d%s %s💤%d%s  %sΣ$%.0f%s" % (
+        BOLD, RESET, n, FLEET_MAX, fg(45), w, RESET, fg(214), ny, RESET, DIM, idl, RESET, DIM, tot, RESET)
+    if five is not None:
+        hud += "  %s5h%s %s%d%%%s" % (DIM, RESET, fg(zone(five)[1]), round(five), RESET)
+    if seven is not None:
+        hud += " %s· 7d %d%%%s" % (DIM, round(seven), RESET)
+
+    # per-lane metrics row (aligned to lanes): ctx% + $cost when there's room
+    term_w = PW // 2 if sext else PW
+    fw = max(4, term_w // n)
+    cells = []
+    for s in ships:
+        cv = round(to_num(s.get("ctx")) or 0.0)
+        _, zcol = zone(cv)
+        lab = "%d%%" % cv
+        if fw >= 8:
+            lab += " $%d" % round(to_num(s.get("cost")) or 0.0)
+        pad = fw - len(lab)
+        left = max(0, pad // 2)
+        cells.append(" " * left + fg(zcol) + lab + RESET + " " * max(0, pad - left))
+    metrics = "".join(cells)
+
+    return "\n".join([hud] + scene + [metrics]) + "\n"
+
+
 # ---- CLI (hero picker) vs statusline (stdin) mode ----------------------------
 def _mock():
     now = int(time.time())
@@ -857,8 +1090,34 @@ def _test_glyphs():
     print("If it shows boxes, keep the safe size:  --set-pixels half")
 
 
+def _cli_hook(arg):
+    """Called by Claude Code hooks: read the hook JSON on stdin, update this
+    session's fleet file. arg is a target state, or 'start' / 'end'."""
+    try:
+        d = json.loads(sys.stdin.read())
+        if not isinstance(d, dict):
+            d = {}
+    except Exception:
+        d = {}
+    sid = d.get("session_id") or "unknown"
+    cwd = d.get("cwd")
+    upd = {"dir": os.path.basename(cwd)} if cwd else {}
+    if arg == "end":
+        try:
+            os.remove(_fleet_path(sid))
+        except Exception:
+            pass
+    elif arg == "start":
+        _fleet_write(sid, upd)
+    elif arg in ("working", "idle", "needsyou", "error"):
+        _fleet_write(sid, upd, state=arg)
+    return 0
+
+
 def _cli(argv):
     cmd = argv[1].lstrip("-").lower()
+    if cmd == "hook":
+        return _cli_hook(argv[2] if len(argv) > 2 else "")
     if cmd in ("list", "heroes"):
         cur = resolve_hero()
         print("Heroes (current: %s):\n" % cur)
@@ -867,7 +1126,7 @@ def _cli(argv):
             print("  %s %-8s %s" % (mark, name, h["label"]))
         base = os.path.basename(__file__)
         print("\nPick a hero:  python %s --set <name>" % base)
-        print("Pick a scene: python %s --set-style <flat|summit>   (current: %s)" % (base, resolve_style()))
+        print("Pick a scene: python %s --set-style <flat|summit|fleet>  (current: %s)" % (base, resolve_style()))
         print("Theme:        python %s --set-theme <day|cyber>      (current: %s)" % (base, resolve_theme()))
         print("Pixel size:   python %s --set-pixels <half|sext>    (current: %s)" % (base, resolve_pixels()))
         print("Scene size:   python %s --set-size <small|medium|large>  (current: %s)" % (base, _size_name()))
@@ -920,8 +1179,11 @@ def _cli(argv):
         print("Theme set to '%s'  (%s)" % (t, THEME_FILE))
     elif cmd == "demo":
         name = argv[2].lower() if len(argv) > 2 and argv[2].lower() in HEROES else resolve_hero()
-        render = render_summit if resolve_style() == "summit" else render_statusline
-        sys.stdout.write(render(_mock(), name))
+        style = resolve_style()
+        if style == "fleet":
+            sys.stdout.write(render_fleet(_mock()))
+        else:
+            sys.stdout.write((render_summit if style == "summit" else render_statusline)(_mock(), name))
     else:
         print(__doc__.split("Honest animation")[0].strip())
     return 0
@@ -937,8 +1199,12 @@ def main():
             data = {}
     except Exception:
         data = {}
-    render = render_summit if resolve_style() == "summit" else render_statusline
-    sys.stdout.write(render(data, resolve_hero()))
+    style = resolve_style()
+    if style == "fleet":
+        sys.stdout.write(render_fleet(data))
+    else:
+        render = render_summit if style == "summit" else render_statusline
+        sys.stdout.write(render(data, resolve_hero()))
 
 
 main()
