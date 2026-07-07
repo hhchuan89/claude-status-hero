@@ -9,7 +9,7 @@ iTerm2/tmux pane and glance at the whole fleet:
   • state beacon: ⚡ working (bobs) · ❗ NEEDS YOU (blinks) · 💤 idle
                   🌀 compacting · 👻 stale/ghost
   • last activity per session ("you: fix the tests…", "Bash: pytest -q…")
-  • account-wide 5h / 7d meters + Σ cost in the header
+  • account-wide 5h / 7d meters + total cost in the header
   • macOS notification when any session flips to NEEDS YOU
 
 Usage:
@@ -276,7 +276,7 @@ SPRITE_W, SPRITE_H = 10, 8   # pixels → 10 cols x 4 terminal rows
 HERO_EMOJI = {"fox": "🦊", "cat": "🐱", "frog": "🐸", "owl": "🦉",
               "penguin": "🐧", "rabbit": "🐰", "bear": "🐻", "duck": "🦆"}
 
-G_SUM = "sum " if ASCII else "Σ "
+G_SUM = "cost "
 G_RESET_AT = "R " if ASCII else "↻"
 SEP = " - " if ASCII else " · "
 
