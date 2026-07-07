@@ -798,7 +798,12 @@ def shell_cmd(*parts):
     out = []
     for p in parts:
         if os.name == "nt":
-            if not re.fullmatch(r"[A-Za-z0-9_\-.:\\/]+", p):
+            # Claude Code runs statusLine/hook commands through a POSIX shell
+            # even on Windows, where an unquoted backslash is an escape char
+            # ("C:\\Python\\python.exe" -> "C:Pythonpython.exe": not found).
+            # Forward slashes work as path separators in that shell and cmd.exe.
+            p = p.replace("\\", "/")
+            if not re.fullmatch(r"[A-Za-z0-9_\-.:/]+", p):
                 p = '"%s"' % p.replace('"', '""')
         else:
             import shlex
