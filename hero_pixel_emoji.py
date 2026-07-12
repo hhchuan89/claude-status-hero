@@ -573,8 +573,7 @@ def draw_reception(img, d, model):
     queue = model["queue"]
     if not queue:
         return
-    front, rest = queue[0], queue[1:3]
-    overflow = len(queue) - 1 - len(rest)
+    front = queue[0]
     fy = 134
     hero = safe_hero(front.get("hero"))
     emoji(img, cx - 32, fy, _hb.HERO_EMOJI[hero], 64)
@@ -587,17 +586,28 @@ def draw_reception(img, d, model):
         icon_chip(img, d, cx, fy + 100,
                   [("tick", PAL["alarm"], 5), ("text", ask)],
                   font=F_mono(16), ink=PAL["ink"], plate=PAL["hud_plate"], anchor="mt")
-    ry = 268
-    for s in rest:
+    # Everyone else who needs you: a compact one-line list (small hero + name +
+    # escalation-coloured wait), already sorted longest-wait-first — so at the
+    # 8-window max you still see every waiting session by name, not a bare "+N".
+    rest = queue[1:]
+    list_top, pitch = 262, 25
+    slots = max(1, (y1 - 8 - list_top) // pitch)
+    shown = rest if len(rest) <= slots else rest[:slots - 1]
+    extra = len(rest) - len(shown)
+    ry = list_top
+    for s in shown:
         hero = safe_hero(s.get("hero"))
-        emoji(img, cx - 24, ry, _hb.HERO_EMOJI[hero], 48)
+        emoji(img, x0 + 16, ry - 2, _hb.HERO_EMOJI[hero], 22)
+        name = _hb.sanitize(s.get("dir") or "?", 20)
+        name = name if len(name) <= 11 else name[:10] + "…"
+        text_plate(img, d, x0 + 46, ry, name, font=F_mono(16),
+                   ink=PAL["ink_dim"], plate=PAL["hud_plate"], anchor="lt")
         plate, ink, prefix = _escalation_style(s["tier"])
-        icon_chip(img, d, cx, ry + 52,
-                  [("text", "%s%dM" % (prefix, s["wait_min"]))],
-                  font=F_mono(16), ink=ink, plate=plate, anchor="mt")
-        ry += 82
-    if overflow > 0:
-        text_plate(img, d, cx, ry, "+%d MORE" % overflow, font=F_mono(16),
+        icon_chip(img, d, x1 - 16, ry, [("text", "%s%dM" % (prefix, s["wait_min"]))],
+                  font=F_mono(16), ink=ink, plate=plate, anchor="rt")
+        ry += pitch
+    if extra > 0:
+        text_plate(img, d, cx, ry, "+%d MORE" % extra, font=F_mono(16),
                    ink=PAL["ink_dim"], anchor="mt")
 
 

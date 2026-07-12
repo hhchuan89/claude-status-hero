@@ -760,8 +760,7 @@ def draw_reception(fb, model):
     queue = model["queue"]
     if not queue:
         return
-    front, rest = queue[0], queue[1:3]
-    overflow = len(queue) - 1 - len(rest)
+    front = queue[0]
     fy = 134
     hero = safe_hero(front.get("hero"))
     sp = SPRITES[hero]
@@ -773,17 +772,27 @@ def draw_reception(fb, model):
     if ask:
         icon_chip(fb, cx, fy + 100, [("tick", PALETTE_IDX["alarm"], 5), ("text", ask)],
                   ink=PALETTE_IDX["ink"], plate=PALETTE_IDX["hud_plate"], anchor="mt")
-    ry = 268
-    for s in rest:
+    # compact list of everyone else (mirrors the emoji backend): small hero +
+    # name + escalation wait, sorted longest-wait-first, so all 8 windows show.
+    rest = queue[1:]
+    list_top, pitch = 262, 25
+    slots = max(1, (y1 - 8 - list_top) // pitch)
+    shown = rest if len(rest) <= slots else rest[:slots - 1]
+    extra = len(rest) - len(shown)
+    ry = list_top
+    for s in shown:
         hero = safe_hero(s.get("hero"))
         sp = SPRITES[hero]
-        fb.blit_sprite(cx - 20, ry, sp["px"], _hero_pal_map(hero), scale=4)
+        fb.blit_sprite(x0 + 14, ry - 2, sp["px"], _hero_pal_map(hero), scale=3)
+        name = _crop(_hb.sanitize(s.get("dir") or "?", 20), 10)
+        text_plate(fb, x0 + 46, ry, name, ink=PALETTE_IDX["ink_dim"],
+                   plate=PALETTE_IDX["hud_plate"], anchor="lt")
         plate_idx, ink_idx, prefix = _escalation_style(s["tier"])
-        icon_chip(fb, cx, ry + 52, [("text", "%s%dM" % (prefix, s["wait_min"]))],
-                  ink=ink_idx, plate=plate_idx, anchor="mt")
-        ry += 82
-    if overflow > 0:
-        text_plate(fb, cx, ry, "+%d MORE" % overflow, ink=PALETTE_IDX["ink_dim"], anchor="mt")
+        icon_chip(fb, x1 - 16, ry, [("text", "%s%dM" % (prefix, s["wait_min"]))],
+                  ink=ink_idx, plate=plate_idx, anchor="rt")
+        ry += pitch
+    if extra > 0:
+        text_plate(fb, cx, ry, "+%d MORE" % extra, ink=PALETTE_IDX["ink_dim"], anchor="mt")
 
 
 def draw_pantry(fb, model):
