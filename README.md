@@ -114,9 +114,9 @@ python3 hero_board.py --pixel --scale 2  # 2× nearest-neighbour for Retina pane
 
 - **Manager room, not a reception desk**: sessions that flip to `NEEDS YOU`
   teleport here, sorted **longest-wait-first**, front-and-biggest with what
-  they need (`permission: Bash rm -rf …`, `waiting for you`). A **YOU** desk
-  (the label is a constant near the top of `hero_pixel.py` — rename it) sits
-  behind the counter; that's who the queue is waiting on.
+  they need (`permission: Bash rm -rf …`, `waiting for you`). A desk marked
+  with **your name** — pulled from your OS account, falling back to `YOU` —
+  sits behind the counter; that's who the queue is waiting on.
 - **Long-wait escalation**: a queued wait chip climbs dim → amber (≥15 min) →
   vermillion + `!!` (≥30 min), so a neglected window can't hide behind the
   front of the queue.

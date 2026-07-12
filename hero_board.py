@@ -1097,14 +1097,44 @@ def ensure_board(argv):
         sys.stderr.write("auto-launch is macOS-only for now — run: %s\n" % cmd)
         return 0
     esc = cmd.replace("\\", "\\\\").replace('"', '\\"')
+    # Open the window BIG from the first frame. The sixel office sizes itself to
+    # the terminal's pixel dimensions, so a default 80x24 window renders a tiny
+    # office; worse, resizing it later leaves a few-second gap before the next
+    # event-driven redraw catches up (reads like a bug). So we set a generous
+    # 160x44 up front — and for iTerm2 we resize the session BEFORE running the
+    # command, so the office is full-size on its very first draw. Sizing is
+    # best-effort (wrapped in `try`): if it fails the window still opens.
+    COLS, ROWS = 160, 44
     if os.environ.get("TERM_PROGRAM") == "iTerm.app":
-        script = ('tell application "iTerm" to create window with default '
-                  'profile command "%s"' % esc)
+        lines = [
+            'tell application "iTerm"',
+            '  set w to (create window with default profile)',
+            '  tell current session of w',
+            '    try',
+            '      set columns to %d' % COLS,
+            '      set rows to %d' % ROWS,
+            '    end try',
+            '    write text "%s"' % esc,
+            '  end tell',
+            'end tell',
+        ]
     else:
-        script = 'tell application "Terminal" to do script "%s"' % esc
+        lines = [
+            'tell application "Terminal"',
+            '  set w to do script ""',
+            '  try',
+            '    set number of columns of front window to %d' % COLS,
+            '    set number of rows of front window to %d' % ROWS,
+            '  end try',
+            '  do script "%s" in w' % esc,
+            '  activate',
+            'end tell',
+        ]
+    osa = ["osascript"]
+    for ln in lines:
+        osa += ["-e", ln]
     try:
-        subprocess.Popen(["osascript", "-e", script],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(osa, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
     return 0

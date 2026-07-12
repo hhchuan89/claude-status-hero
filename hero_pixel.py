@@ -56,7 +56,33 @@ import zlib
 
 # --------------------------------------------------------------- constants
 
-MANAGER_LABEL = "YOU"   # the boss's desk in the manager room; integrator may edit
+MANAGER_LABEL = "YOU"   # fallback desk marker when the OS gives us no user name
+
+
+def _user_display_name():
+    """Who the fleet is waiting on — the manager desk marker. Prefer the OS
+    account's real name (macOS GECOS), then the login name, then MANAGER_LABEL.
+    Uppercased; the full name if it fits the narrow plate (<=12 chars), else
+    just the first token. Never raises (a monitor must not die because a name
+    lookup hiccuped)."""
+    name = ""
+    try:
+        import pwd
+        name = (pwd.getpwuid(os.getuid()).pw_gecos or "").split(",")[0].strip()
+    except Exception:
+        name = ""
+    if not name:
+        try:
+            import getpass
+            name = getpass.getuser() or ""
+        except Exception:
+            name = ""
+    full = " ".join(name.split()).upper()    # collapse internal whitespace
+    if not full:
+        return MANAGER_LABEL
+    if len(full) <= 12:
+        return full                           # "HOH CHUAN" — fits the plate
+    return full.split()[0][:12]               # long name -> first token only
 
 ESCALATE_AMBER_MIN = 15   # long-wait escalation tier 1 (amber)
 ESCALATE_ALARM_MIN = 30   # long-wait escalation tier 2 (vermillion + "!!")
@@ -884,7 +910,7 @@ def build_office_model(sessions, now, manager_label=None):
     """Pure data-mapping layer: sessions (as produced by hero_board.fleet(),
     each already carrying `_state`) -> everything draw_office() needs. No
     drawing, no I/O — directly unit-testable."""
-    manager_label = MANAGER_LABEL if manager_label is None else manager_label
+    manager_label = _user_display_name() if manager_label is None else manager_label
     live = [s for s in sessions if s.get("_state") != "ghost"]
 
     queue = []
@@ -1297,6 +1323,12 @@ def run(argv):
             png_path = argv[idx + 1]
 
     sixel_ok = detect_sixel()
+    # Progressive enhancement, out loud: if we're about to draw the office but
+    # Pillow (the emoji backend) is missing, say so once and how to upgrade —
+    # never install anything behind the user's back.
+    if sixel_ok and not emoji_available():
+        sys.stderr.write("\x1b[2m[status-hero] drawing the stdlib pixel office; "
+                         "`pip install pillow` for the Apple-emoji one.\x1b[0m\n")
 
     def build_and_draw():
         """Returns (fb, palette). `palette` is None for the stdlib sprite
