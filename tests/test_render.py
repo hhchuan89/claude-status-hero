@@ -5,7 +5,9 @@ The contracts under test:
   1. hero_line prints EXACTLY 3 lines, each EXACTLY W display columns,
      for any payload (including garbage) and any COLUMNS.
   2. No control chars leak except SGR color sequences.
-  3. The hook state machine transitions correctly; SessionEnd deletes.
+  3. The hook state machine transitions correctly; SessionEnd tombstones
+     (never deletes: an in-flight statusline render must not resurrect the
+     session; the board buries tombstones on sight).
   4. --install / --uninstall are idempotent and preserve foreign entries.
   5. hero_board --once renders every line at exactly the same width, and
      never crashes across sizes/modes.
@@ -117,6 +119,9 @@ PAYLOADS = {
                                                    "resets_at": 0}}),
     "over-100": payload(rate_limits={"five_hour": {"used_percentage": 140,
                                                    "resets_at": "bogus"}}),
+    "nan-inf": payload(cost={"total_cost_usd": float("nan"),
+                             "total_duration_ms": float("inf")},
+                       context_window={"used_percentage": float("nan")}),
 }
 ENVS = {
     "default": {},
@@ -186,10 +191,20 @@ hook("PostCompact")
 check("PostCompact→working", state()["state"] == "working")
 check("started_at stable", state()["started_at"] == first_start)
 hook("SessionEnd")
-check("SessionEnd deletes file", not os.path.exists(sess_file))
+s = state()
+check("SessionEnd writes tombstone", s.get("ended") is True and "state" not in s)
 p = hook("UnknownEvent")
 check("unknown hook exits 0", p.returncode == 0)
-check("unknown hook writes nothing", not os.path.exists(sess_file))
+check("unknown hook leaves tombstone alone", state().get("ended") is True)
+# an in-flight statusline render (metrics-only write) must NOT resurrect it
+p = run(LINE, stdin=payload(session_id="t-hooks"), env_extra={"_dir": state_dir})
+check("statusline can't resurrect tombstone", p.returncode == 0
+      and state().get("ended") is True and "state" not in state())
+# ...but a real hook may (resumed session reuses its session_id)
+hook("SessionStart")
+s = state()
+check("SessionStart resurrects tombstone",
+      s.get("state") == "working" and not s.get("ended"))
 
 # ----------------------------------------------- 4: installer idempotence
 
@@ -277,10 +292,10 @@ check("shell_cmd quotes metachars",
 
 print("== hero_board ==")
 for cols, rows in (("60", "15"), ("100", "30"), ("200", "50")):
-    for mode in ([], ["--list"]):
+    for mode in ([], ["--list"], ["--office"]):
         for ev in ({}, {"STATUS_HERO_ASCII": "1"}):
             tag = "board cols=%s rows=%s %s%s" % (
-                cols, rows, "list" if mode else "scene",
+                cols, rows, mode[0][2:] if mode else "scene",
                 " ascii" if ev else "")
             p = run(BOARD, ["--demo", "--once"] + mode, env_extra=dict(ev),
                     cols=cols, lines=rows)
@@ -304,13 +319,47 @@ mk = lambda sid, started, ts, st="working": json.dump(
 mk("younger", now - 10, now)
 mk("older", now - 500, now)
 mk("corpse", now - 90000, now - 90000)   # >24h: should be buried
+json.dump({"sid": "gone", "ended": True, "ts": now},       # fresh tombstone
+          open(os.path.join(sess2, "gone.json"), "w"))
+json.dump({"sid": "gone2", "ended": True, "ts": now - 120},  # aged tombstone
+          open(os.path.join(sess2, "gone2.json"), "w"))
 p = run(BOARD, ["--once", "--list"], env_extra={"_dir": state_dir2},
         cols="120", lines="30")
 out = ANSI.sub("", p.stdout)
 check("board hides day-old corpse", "corpse" not in out)
 check("corpse file removed", not os.path.exists(os.path.join(sess2, "corpse.json")))
+check("board hides fresh tombstone", "gone" not in out)
+check("fresh tombstone KEPT on disk",      # burying it early would re-open
+      os.path.exists(os.path.join(sess2, "gone.json")))   # the delete race
+check("aged tombstone buried",
+      not os.path.exists(os.path.join(sess2, "gone2.json")))
 check("lane order by started_at",
       out.find("older") != -1 and out.find("older") < out.find("younger"))
+
+# hostile session files must never crash the board (NaN/inf pass json.load;
+# non-string state/hero/sid would TypeError on dict keying)
+state_dirH = os.path.join(tempfile.mkdtemp(prefix="sh-hostile-"), "state")
+sessH = os.path.join(state_dirH, "sessions")
+os.makedirs(sessH)
+open(os.path.join(sessH, "nan.json"), "w").write(
+    '{"sid":"nan","dir":"nan","hero":"fox","state":"working",'
+    '"state_ts":%d,"ts":%d,"started_at":1,"ctx":NaN,"cost":Infinity,'
+    '"five":NaN,"five_reset":NaN}' % (now, now))
+json.dump({"sid": "types", "dir": "types", "hero": ["cat"], "state": {"x": 1},
+           "state_ts": now, "ts": now, "started_at": 2, "ctx": 50},
+          open(os.path.join(sessH, "types.json"), "w"))
+json.dump({"sid": ["evil"], "dir": "evil", "ts": now},   # unhashable sid
+          open(os.path.join(sessH, "badsid.json"), "w"))
+for mode in ([], ["--list"], ["--office"]):
+    mname = mode[0][2:] if mode else "scene"
+    p = run(BOARD, ["--once"] + mode, env_extra={"_dir": state_dirH},
+            cols="100", lines="30")
+    outl = [ln for ln in p.stdout.split("\n") if ln != ""]
+    check("board hostile files %s exit0" % mname, p.returncode == 0,
+          p.stderr[:300])
+    check("board hostile files %s uniform width" % mname,
+          {disp_width(ln) for ln in outl} == {99},
+          "got %s" % sorted({disp_width(ln) for ln in outl}))
 
 # CJK names/activity must not shear scene lanes (review regression)
 state_dir3 = os.path.join(tempfile.mkdtemp(prefix="sh-cjk-"), "state")
@@ -325,15 +374,121 @@ for i, (sid, d_, act) in enumerate((
                "started_at": now - i, "ctx": 40 + i * 20, "cost": 5.0,
                "activity": act},
               open(os.path.join(sess3, sid + ".json"), "w"))
-for mode in ([], ["--list"]):
+for mode in ([], ["--list"], ["--office"]):
+    mname = mode[0][2:] if mode else "scene"
     p = run(BOARD, ["--once"] + mode, env_extra={"_dir": state_dir3},
             cols="100", lines="30")
     outl = [ln for ln in p.stdout.split("\n") if ln != ""]
     widths = {disp_width(ln) for ln in outl}
-    check("board CJK %s uniform width" % ("list" if mode else "scene"),
+    check("board CJK %s uniform width" % mname,
           widths == {99}, "got %s" % sorted(widths))
-    check("board CJK %s shows name" % ("list" if mode else "scene"),
+    check("board CJK %s shows name" % mname,
           "深度研" in ANSI.sub("", p.stdout))
+
+# office v3: emoji actors (identical glyph to the statusline), not big
+# half-block sprites — and cost + activity (speech bubble) ARE on the floor
+# plan now; ctx/usage meters are NOT (those stay in the statusline/list).
+p = run(BOARD, ["--demo", "--once", "--office"], cols="100", lines="30")
+plain = ANSI.sub("", p.stdout)
+check("office draws the room", "┌" in plain and "└" in plain and "│" in plain)
+check("office has a break room (茶水间)", "茶水间" in plain, plain[:400])
+check("office shows a desk name plate", "sightlab" in plain, plain[:400])
+check("office actor is the statusline hero glyph", "🦊" in p.stdout, p.stdout[:400])
+check("office shows a state beacon", "⚡" in p.stdout, p.stdout[:400])
+check("office shows per-desk cost", "$31.26" in plain, plain[:400])
+check("office has no ctx%/usage on the floor plan",
+      "ctx" not in plain and "%" not in plain, plain[:400])
+check("office speech bubble carries the activity string",
+      "(" in plain and "pytest" in plain, plain[:400])
+check("office header drops the 5h/7d usage block", "5h" not in plain,
+      plain[:400])
+check("office has no half-block sprites left", "▀" not in plain, plain[:400])
+check("office has furniture (potted plant)", "🪴" in p.stdout, p.stdout[:400])
+door_rows = [ln for ln in plain.split("\n")
+             if ln.startswith(" ") and ln.rstrip().endswith("│")]
+check("office has a door gap in the left wall", len(door_rows) >= 3,
+      "got %d" % len(door_rows))
+
+# scene mode keeps the full header (5h/7d) — only office trims it; a wide
+# terminal is needed since the 5h/7d block is dropped when it wouldn't fit
+p = run(BOARD, ["--demo", "--once"], cols="200", lines="30")
+check("scene header keeps the 5h/7d usage block",
+      "5h" in ANSI.sub("", p.stdout), p.stdout[:400])
+p = run(BOARD, ["--demo", "--once", "--office"], cols="100", lines="15")
+check("office short terminal falls back (no room)",
+      "┌" not in ANSI.sub("", p.stdout))
+state_dir9 = os.path.join(tempfile.mkdtemp(prefix="sh-nine-"), "state")
+sess9 = os.path.join(state_dir9, "sessions")
+os.makedirs(sess9)
+for i in range(9):
+    json.dump({"sid": "s%d" % i, "dir": "proj%d" % i, "hero": "fox",
+               "state": "working", "state_ts": now, "ts": now,
+               "started_at": now - i, "ctx": 10, "cost": 1.0},
+              open(os.path.join(sess9, "s%d.json" % i), "w"))
+p = run(BOARD, ["--once", "--office"], env_extra={"_dir": state_dir9},
+        cols="200", lines="40")
+plain9 = ANSI.sub("", p.stdout)
+check("office >8 sessions falls back to list",
+      "┌" not in plain9 and "proj8" in plain9)
+
+# office walk animation (floor-plan): idle walks DOWN its column to the
+# break room and back UP when working; new sids enter from the door and
+# ended sids leave; needs_you snaps to its desk (attention > choreography)
+anim_code = """
+import sys; sys.path.insert(0, %r)
+import hero_board as hb
+def G(ss):                       # geo is recomputed per frame, like render
+    return hb.office_geo(len(ss), 96, 20)
+ss = [{'sid':'a','hero':'fox','_state':'working'},
+      {'sid':'b','hero':'cat','_state':'working'}]
+st = {}
+hb.office_move(st, ss, G(ss))                     # init: seat the fleet
+placed, w = hb.office_move(st, ss, G(ss))
+assert w == [] and all(not p[3] for p in placed.values()), placed  # all seated
+geo = G(ss); seat_y = geo['seats'][0][1]; lounge_y = geo['lounges'][0][1]
+assert placed['a'][1] == seat_y and placed['a'][4] is True
+# 'a' goes idle -> must WALK DOWN its column toward the break room
+ss[0]['_state'] = 'idle'
+ys = []
+for _ in range(60):
+    placed, w = hb.office_move(st, ss, G(ss))
+    ys.append(placed['a'][1])
+    if not placed['a'][3]: break
+assert ys == sorted(ys) and ys[-1] == lounge_y, ys      # monotone downward
+assert placed['a'][4] is False                          # now on break
+# new session enters from the door (x climbs from 0), then seats
+ss.append({'sid':'c','hero':'frog','_state':'working'})
+xs = []
+for _ in range(80):
+    placed, w = hb.office_move(st, ss, G(ss))
+    xs.append(placed['c'][0])
+    if not placed['c'][3]: break
+assert xs[0] < xs[-1] and xs == sorted(xs), xs
+# ended session walks out and is dropped
+ss.pop()
+seen = False
+for _ in range(200):
+    placed, w = hb.office_move(st, ss, G(ss))
+    if w: seen = True
+    if not w and seen: break
+assert seen and not st['leaving'], st
+# needs_you snaps straight to its desk, no walk
+ss.append({'sid':'d','hero':'owl','_state':'needs_you'})
+placed, w = hb.office_move(st, ss, G(ss))
+assert placed['d'][3] is False and placed['d'][1] == G(ss)['seats'][2][1], placed
+# the LAST session's walk-out must play in an otherwise-empty room
+st2 = {}
+hb.render_office([{'sid':'z','hero':'duck','_state':'working'}],
+                 99, 29, 0, True, st2)
+lines = hb.render_office([], 99, 29, 1, True, st2)
+assert st2['leaving'], st2
+assert not any('no live sessions' in l for l in lines), 'room vanished'
+print('anim-ok')
+""" % ROOT
+p = subprocess.run([PY, "-c", anim_code], capture_output=True, text=True,
+                   timeout=30)
+check("office walk anim deterministic + terminates",
+      "anim-ok" in p.stdout, (p.stderr or p.stdout)[:400])
 
 # narrow list mode must not truncate the cost column (review regression)
 p = run(BOARD, ["--demo", "--once", "--list"], cols="60", lines="20")
@@ -342,11 +497,13 @@ check("board narrow list cost intact",
       len(re.findall(r"\$\s*\d+\.\d\d", plain)) >= 5, plain[:200])
 
 # ASCII mode board must be pure ASCII (review regression)
-p = run(BOARD, ["--demo", "--once"], env_extra={"STATUS_HERO_ASCII": "1"},
-        cols="100", lines="30")
-plain = ANSI.sub("", p.stdout)
-nonascii = sorted({c for c in plain if ord(c) > 127})
-check("board ASCII mode pure ascii", not nonascii, repr(nonascii[:10]))
+for mode in ([], ["--office"]):
+    p = run(BOARD, ["--demo", "--once"] + mode,
+            env_extra={"STATUS_HERO_ASCII": "1"}, cols="100", lines="30")
+    plain = ANSI.sub("", p.stdout)
+    nonascii = sorted({c for c in plain if ord(c) > 127})
+    check("board ASCII %s pure ascii" % (mode[0][2:] if mode else "scene"),
+          not nonascii, repr(nonascii[:10]))
 p = run(LINE, stdin=payload(), env_extra={"STATUS_HERO_ASCII": "1"}, cols="100")
 plain = ANSI.sub("", p.stdout)
 nonascii = sorted({c for c in plain if ord(c) > 127})

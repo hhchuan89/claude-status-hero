@@ -33,6 +33,7 @@ Python ≥3.9, stdlib only. MIT.
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -47,7 +48,8 @@ AMBIG_WIDE = os.environ.get("STATUS_HERO_AMBIG_WIDE", "") not in ("", "0")
 if AMBIG_WIDE:
     ASCII = True  # ambiguous-wide terminals can't render block bars safely
 NO_COLOR = os.environ.get("NO_COLOR") is not None
-TRUECOLOR = os.environ.get("COLORTERM", "") in ("truecolor", "24bit")
+TRUECOLOR = (os.environ.get("COLORTERM", "") in ("truecolor", "24bit")
+             or bool(os.environ.get("WT_SESSION")))  # WT never sets COLORTERM
 
 STATE_DIR = os.environ.get("STATUS_HERO_DIR") or os.path.join(
     os.path.expanduser("~"), ".claude", "status-hero"
@@ -188,6 +190,7 @@ def sanitize(s, limit=120):
     Strips ANSI, C0/C1 controls, and invisible format chars (bidi overrides)."""
     if not isinstance(s, str):
         return ""
+    s = s[:4096]        # bound the scans: session files can be hostile/huge
     s = CTRL_STRIP.sub("", ANSI_TOKEN.sub("", s))
     s = "".join(ch for ch in s if unicodedata.category(ch) != "Cf").strip()
     if len(s) > limit:
@@ -210,9 +213,11 @@ def get(d, *path):
 
 def num(v):
     try:
-        return float(v)
+        f = float(v)
     except (TypeError, ValueError):
         return None
+    # json admits bare NaN/Infinity; int()/round() on them crashes renders
+    return f if math.isfinite(f) else None
 
 
 def fmt_reset(epoch_s):
@@ -288,7 +293,16 @@ def atomic_write(path, data):
     try:
         with _open_excl(tmp) as f:
             json.dump(data, f)
-        os.replace(tmp, path)
+        for attempt in range(3):
+            try:
+                os.replace(tmp, path)
+                return
+            except OSError:
+                # Windows: replace fails while a reader (the board, 4 fps)
+                # holds the file open — sub-ms window, one retry wins.
+                if os.name != "nt" or attempt == 2:
+                    raise
+                time.sleep(0.01)
     except Exception:
         try:
             os.remove(tmp)
@@ -302,6 +316,10 @@ def update_session(sid, updates):
     _ensure_dirs()
     path = sess_path(sid)
     s = load_json(path) or {}
+    if s.get("ended") and "state" not in updates:
+        return          # tombstone: only a live hook may resurrect a session
+    if "state" in updates:
+        s.pop("ended", None)
     s.update(updates)
     s["sid"] = str(sid)[:80]
     s["ts"] = time.time()
@@ -309,6 +327,17 @@ def update_session(sid, updates):
         s["hero"] = pick_hero(sid)
     if "started_at" not in s:
         s["started_at"] = s["ts"]  # first sighting = stable lane order
+    if "state" not in updates:
+        # metrics-only write (statusline): a hook may have advanced the state
+        # between our load and now — re-check so we never roll it back.
+        fresh = load_json(path)
+        if fresh:
+            if fresh.get("ended"):
+                return
+            if (num(fresh.get("state_ts")) or 0) > (num(s.get("state_ts")) or 0):
+                for k in ("state", "state_ts", "need", "activity", "activity_ts"):
+                    if k in fresh:
+                        s[k] = fresh[k]
     atomic_write(path, s)
 
 
@@ -329,12 +358,22 @@ def all_sessions():
         names = sorted(os.listdir(SESS_DIR))[:64]  # sanity cap
     except Exception:
         return out
+    now = time.time()
     for n in names:
         if not n.endswith(".json"):
             continue
-        s = load_json(os.path.join(SESS_DIR, n))
-        if s and s.get("sid"):
-            out.append(s)
+        path = os.path.join(SESS_DIR, n)
+        s = load_json(path)
+        if not s or not s.get("sid"):
+            continue
+        if s.get("ended"):
+            if now - (num(s.get("ts")) or 0) > 600:
+                try:
+                    os.remove(path)   # stale tombstone: board isn't running
+                except Exception:
+                    pass
+            continue
+        out.append(s)
     return out
 
 
@@ -388,10 +427,15 @@ def git_branch(cwd):
     except Exception:
         info = ""
     try:
-        with open(cache, "w", encoding="utf-8") as f:
+        tmp = _tmp_name(cache)          # atomic: two windows share this cache
+        with _open_excl(tmp) as f:
             f.write(info)
+        os.replace(tmp, cache)
     except Exception:
-        pass
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
     return info
 
 
@@ -726,20 +770,36 @@ def fleet_summary(sessions, own_sid):
 
 def handle_hook(event):
     """Update session state. Must NEVER block or fail (exit 0 always)."""
+    raw, total = [], 0
     try:
-        payload = json.loads(sys.stdin.read(1000000) or "{}")
+        while True:                     # read to EOF: a PostToolUse payload
+            chunk = sys.stdin.read(1 << 20)   # embeds whole tool_input/response
+            if not chunk:
+                break
+            total += len(chunk)
+            if total <= (1 << 23):      # keep <=8 MB, drain the rest
+                raw.append(chunk)
     except Exception:
-        payload = {}
+        pass
+    raw = "".join(raw)
+    try:
+        payload = json.loads(raw or "{}")
+    except Exception:
+        # oversized/truncated payload: salvage the sid (it leads the JSON)
+        # so the STATE flip still lands; only the activity detail is lost.
+        m = re.search(r'"session_id"\s*:\s*"([A-Za-z0-9_-]{1,80})"', raw[:4096])
+        payload = {"session_id": m.group(1)} if m else {}
     sid = payload.get("session_id")
     if not sid:
         return
     now = time.time()
 
     if event == "SessionEnd":
-        try:
-            os.remove(sess_path(sid))
-        except Exception:
-            pass
+        # tombstone, not delete: an in-flight statusline render (git can take
+        # seconds) would otherwise resurrect the file after os.remove and the
+        # board would show a zombie lane. The board buries tombstones on sight.
+        atomic_write(sess_path(sid), {"sid": str(sid)[:80], "ended": True,
+                                      "ts": now})
         return
 
     upd = {}

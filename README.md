@@ -81,13 +81,58 @@ Open a spare pane, run `python3 hero_board.py`, keep it in the corner:
 - one **pixel-art hero per live session** — big enough to actually see
 - each stands on a **pillar = its context %** (red pillar ≈ compaction soon)
 - state beacons: ⚡ working (hero trots) · ❗ **NEEDS YOU** (blinks, name
-  inverted, macOS notification) · 💤 idle · 🌀 compacting · 👻 stale
+  inverted, macOS notification / Windows beep) · 💤 idle · 🌀 compacting ·
+  👻 stale
 - last activity per session: `you: fix the tests…`, `Bash: pytest -q…` —
   so you know *which* window to jump to and *why*
 - header: account-wide 5h/7d meters, Σ cost, live count
-- `m` toggles a dense list mode; `q` quits; `--fps 8` if you want it smoother
+- `m` cycles scene → list → office; `q` quits; `--fps 8` for smoother motion
 
 ![hero_board list](preview/hero-board-list.svg)
+
+### The office (`--office`)
+
+A floor plan, not a lineup. Each session's actor is a single **emoji — the
+exact same hero glyph its statusline already shows** (🦊🐱🐸🦉🐧🐰🐻🦆), so
+a glance links a PowerShell/iTerm/tmux window to its desk on the board. Every
+live session gets a compact **desk pod**: an empty chair + laptop, a name
+plate, and a status line of *state beacon + cost so far* — no context % or
+usage meters on the floor plan, the statusline already has those. A **speech
+bubble** pops up over a working/compacting/needs-you actor carrying its
+current activity (`Bash: pytest -q…`, `you: fix the tests…`).
+
+Each session owns a **column**: its desk at the top, its break-room
+(**茶水间**) spot at the bottom. Going **idle** walks the hero down its column
+to the break room, and back up when it resumes. **Open a new Claude Code
+window** and its hero walks in through the door in the left wall; **close it**
+and the hero walks back out. A session flipping to **NEEDS YOU** snaps
+straight to its desk and blinks — attention beats choreography. The room is
+dressed with a rug, a wall clock, potted plants, a water cooler, and a
+desk-front bar that turns red under `NEEDS YOU` — no other desk colouring.
+
+![hero_office](preview/hero-office.svg)
+
+Office needs ≥ 15 interior rows and ~12 columns per session (room height caps
+at 18 rows even on a huge terminal — dense, not stretched); when it can't fit
+(narrow pane, > 8 sessions) it falls back to the dense list. Try it: `python3
+hero_board.py --demo --office` — a visitor walks in and back out every ~22 s.
+
+### Auto-launch (`--autostart`, macOS)
+
+Don't want to remember to open the board? Turn on auto-launch and a single
+board window opens itself whenever you start Claude Code:
+
+```bash
+python3 hero_board.py --autostart on      # install (opt-in)
+python3 hero_board.py --autostart off     # remove
+python3 hero_board.py --autostart status
+```
+
+It adds one `SessionStart` hook that runs `hero_board.py --ensure`, which
+opens a new terminal window (iTerm2 or Terminal) — but **only if a board
+isn't already running** (singleton, so extra Claude Code windows never stack
+more boards). It backs up `settings.json` and leaves every other hook
+untouched; `hero_line.py`'s own hooks are not affected.
 
 ## Install
 
@@ -105,6 +150,11 @@ python3 hero_board.py --demo       # try the board right now, with fake data
 command; `--uninstall` removes exactly our entries and nothing else. The hooks
 (9 events, 5 s timeout, always exit 0) are what feed per-session state to the
 board — without them you still get metrics, just not working/needs-you.
+
+**Run `--install` on each machine.** It bakes the machine's absolute Python
+and script paths into `settings.json` — a settings file synced from macOS to
+Windows (or vice versa) makes every hook fail silently and the board shows
+`no live sessions` forever.
 
 Try before installing:
 
@@ -141,7 +191,10 @@ hero_board.py ──reads all, 4 fps──────────┘
 
 States: `SessionStart/UserPromptSubmit/PostToolUse → working`,
 `Notification(permission|idle) → needs_you`, `Stop → idle`,
-`Pre/PostCompact → compacting`, `SessionEnd → file deleted`. A session whose
+`Pre/PostCompact → compacting`, `SessionEnd → tombstone` (not a delete: an
+in-flight statusline render can land seconds later and must not resurrect
+the session; the board hides tombstones at once and buries them after a
+minute). A session whose
 heartbeat is stale decays to idle, then ghost 👻, then is buried after 24 h.
 Everything is local files — no network, ever. (Prompt snippets are stored in
 that local state dir; they never leave your machine.)
@@ -150,6 +203,7 @@ that local state dir; they never leave your machine.)
 
 ```bash
 python3 tests/test_render.py   # 1200+ checks: geometry, hooks, installer, board
+python3 tests/test_pixel.py    # pixel office: sixel/PNG encoders, data mapping, fallback
 ```
 
 The suite hammers the invariants: always 3 lines, exact display width for

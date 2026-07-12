@@ -5,6 +5,7 @@ __pycache__/
 # One-shot render exports (previews are committed as .svg only)
 *.pdf
 *.html
+*.png
 
 # Local settings backups
 *.status-hero-backup-*
