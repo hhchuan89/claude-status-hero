@@ -263,19 +263,27 @@ session→window mapping is proven.
 
 ## Non-goals
 
-- No Sixel/Kitty image protocols (Claude Code re-renders statusline output;
-  raw escapes get corrupted — confirmed in v1). Re-litigated for office v3's
-  emoji-vs-Sixel actor choice and rejected again: the board also runs inside
-  tmux, and default tmux builds (incl. Homebrew's) compile **without**
-  `--enable-sixel` — tmux would strip or garbage the escapes on that surface,
-  and even hand-rebuilt tmux has documented Sixel bugs in exactly the
-  animated-redraw case (ghost pixels, failed cell overwrites). Emoji work
-  identically on iTerm2 + tmux + Windows Terminal, and — decisive for office
-  v3 — are the pixel-identical glyph the statusline already shows
-  (`HERO_EMOJI == hero_line.HERO_ROSTER`), which a bespoke Sixel sprite would
-  break.
+- No Sixel *in the statusline* — that surface re-renders under Claude Code and
+  corrupts raw escapes (confirmed in v1), so the gauge stays emoji-only.
+  (Sixel itself is **no longer a non-goal**: it now ships as the `--pixel`
+  flagship — see below.)
+- No *baseline* dependence on Sixel. The board also runs inside tmux, and
+  default tmux builds (incl. Homebrew's) compile **without** `--enable-sixel`,
+  so they strip or garble the escapes; even hand-rebuilt tmux has documented
+  Sixel bugs in the animated-redraw case. The resolution isn't to refuse Sixel
+  but to **detect** it (`hero_pixel.detect_sixel()`: env override → isatty gate
+  → DA1 probe) and fall back automatically to the half-block `--office` TUI
+  when it's absent — same rooms, typed instead of drawn. iTerm2 gets the drawn
+  emoji office; tmux / Windows Terminal / plain TTYs get the typed one. The
+  Sixel code is confined to `hero_pixel.py`, which the board only spawns after
+  the probe passes.
 - No Nintendo IP. The roster is IP-clean animals (a decision v1 already made).
-- No network calls, no dependencies: Python ≥3.9 stdlib only, single files.
+- No network calls. No *required* dependencies: Python ≥3.9 stdlib only. The
+  `--pixel` emoji office uses Pillow to bake the emoji glyphs when it's
+  importable and falls back to stdlib sprites when it isn't, so nothing is ever
+  a hard install. `hero_line.py` stays one file; the board is now
+  `hero_board.py` + `hero_pixel.py` (+ `hero_pixel_emoji.py` for the emoji
+  backend).
 
 ## Distribution
 

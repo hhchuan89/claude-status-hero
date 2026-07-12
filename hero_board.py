@@ -13,13 +13,14 @@ iTerm2/tmux pane and glance at the whole fleet:
   • macOS notification when any session flips to NEEDS YOU
 
 Usage:
+  python3 hero_board.py --pixel    # emoji pixel office (sixel); TUI office if unsupported
   python3 hero_board.py            # scene mode, 4 fps
-  python3 hero_board.py --office   # office mode: emoji desk pods + walk-in/out
+  python3 hero_board.py --office   # office mode: emoji desk pods + walk-in/out (TUI)
   python3 hero_board.py --list     # dense one-row-per-session mode
   python3 hero_board.py --demo     # fake fleet (no Claude Code needed)
   python3 hero_board.py --once     # print a single frame and exit
-  python3 hero_board.py --autostart on   # auto-open --office when Claude Code starts
-                                         #   (add --list/--scene to pick another mode)
+  python3 hero_board.py --autostart on   # auto-open --pixel when Claude Code starts
+                                         #   (add --office/--list/--scene to pick another mode)
   --fps N (1-30) · --no-notify · keys: q quit, m cycle modes
 
 Data comes from ~/.claude/status-hero/sessions/*.json, written by
@@ -1114,10 +1115,10 @@ def _is_our_autostart(group):
     return "--ensure" in s and "hero_board.py" in s
 
 
-def autostart(state, mode="--office"):
+def autostart(state, mode="--pixel"):
     """Install / remove the SessionStart hook that auto-opens the board in a
-    given mode (default --office). Backs up settings.json, preserves every
-    other hook, idempotent."""
+    given mode (default --pixel: emoji pixel office, TUI office fallback).
+    Backs up settings.json, preserves every other hook, idempotent."""
     path = _settings_path()
     try:
         with open(path, encoding="utf-8") as f:
@@ -1177,8 +1178,29 @@ def main(argv):
         i = argv.index("--autostart")
         nxt = argv[i + 1] if i + 1 < len(argv) else ""
         state = nxt if nxt in ("on", "off", "status") else "status"
-        mode = next((m for m in ("--office", "--list", "--scene") if m in argv), "--office")
+        mode = next((m for m in ("--pixel", "--office", "--list", "--scene") if m in argv), "--pixel")
         return autostart(state, mode)
+
+    # --pixel: the emoji pixel office (top priority). If the terminal can show
+    # sixel graphics we hand off to hero_pixel.py (Apple-emoji office rendered
+    # as real pixels); otherwise we fall back to the half-block --office TUI so
+    # every terminal still gets a floor plan.
+    if "--pixel" in argv:
+        try:
+            import importlib.util
+            p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hero_pixel.py")
+            spec = importlib.util.spec_from_file_location("status_hero_pixel", p)
+            hp = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(hp)
+            if hp.detect_sixel():
+                return hp.run([a for a in argv if a != "--pixel"])
+        except Exception:
+            pass
+        sys.stderr.write(DIM + "--pixel: no sixel support detected, "
+                         "falling back to office mode" + RESET + "\n")
+        argv = [a for a in argv if a != "--pixel"]
+        if "--office" not in argv:
+            argv = argv + ["--office"]
 
     demo = "--demo" in argv
     once = "--once" in argv

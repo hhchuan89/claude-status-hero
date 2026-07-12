@@ -8,7 +8,10 @@ which one **needs you**, and how hard each is leaning on its context window —
 plus a statusline that packs 5h/7d budgets, context, git, and cost into three
 rock-solid lines.
 
-Two single-file, zero-dependency Python scripts:
+Two commands, no *required* dependencies — Python ≥3.9 stdlib only. (The
+`--pixel` emoji office uses [Pillow](https://python-pillow.org) to bake the
+emoji glyphs if it's importable, and falls back to stdlib sprites if it isn't;
+everything else is pure stdlib.)
 
 | | what | where it runs |
 |---|---|---|
@@ -90,9 +93,47 @@ Open a spare pane, run `python3 hero_board.py`, keep it in the corner:
 
 ![hero_board list](preview/hero-board-list.svg)
 
-### The office (`--office`)
+### The pixel office (`--pixel`) — the main view
 
-A floor plan, not a lineup. Each session's actor is a single **emoji — the
+The flagship. A full 1040×600 pixel-art office rendered to a real bitmap and
+blitted into the terminal with a hand-rolled sixel encoder — the same zones as
+the TUI (office desks, a manager-room queue, a pantry) but *drawn*, not typed.
+Each session is its **animal-emoji hero** baked to pixels (Apple Color Emoji
+via Pillow when it's importable; a stdlib sprite otherwise). It's
+**event-driven, not animated**: sessions teleport between rooms as their state
+changes, and a new frame is drawn only when a session file changes or the clock
+ticks a minute.
+
+![hero_pixel_office](preview/hero-pixel-office.svg)
+
+```bash
+python3 hero_board.py --pixel            # emoji office, live fleet
+python3 hero_board.py --demo --pixel     # emoji office, fake fleet
+python3 hero_board.py --pixel --scale 2  # 2× nearest-neighbour for Retina panes
+```
+
+- **Manager room, not a reception desk**: sessions that flip to `NEEDS YOU`
+  teleport here, sorted **longest-wait-first**, front-and-biggest with what
+  they need (`permission: Bash rm -rf …`, `waiting for you`). A **YOU** desk
+  (the label is a constant near the top of `hero_pixel.py` — rename it) sits
+  behind the counter; that's who the queue is waiting on.
+- **Long-wait escalation**: a queued wait chip climbs dim → amber (≥15 min) →
+  vermillion + `!!` (≥30 min), so a neglected window can't hide behind the
+  front of the queue.
+- **HUD**: an alarm banner (`N WAITING <name> <mins>` / `ALL CLEAR`), 5h/weekly
+  burn gauges with time-to-reset, a live clock, and running cost + $/hr.
+- **Fallback chain**: it probes for sixel support (`STATUS_HERO_SIXEL=1`/`0`
+  forces it); on a terminal that can't show sixel it drops **automatically** to
+  the `--office` TUI below. Every frame is also written to
+  `~/.claude/status-hero/pixel-office.png` (`--png PATH` to change it) — handy
+  for previewing without a sixel terminal, or for anyone reviewing a change who
+  can't see the image inline.
+
+### The office (`--office`) — the TUI fallback
+
+The half-block floor plan `--pixel` drops to when the terminal can't show sixel
+graphics — same rooms, typed instead of drawn. A floor plan, not a lineup. Each
+session's actor is a single **emoji — the
 exact same hero glyph its statusline already shows** (🦊🐱🐸🦉🐧🐰🐻🦆), so
 a glance links a PowerShell/iTerm/tmux window to its desk on the board. Every
 live session gets a compact **desk pod**: an empty chair + laptop, a name
@@ -123,14 +164,15 @@ Don't want to remember to open the board? Turn on auto-launch and a single
 board window opens itself whenever you start Claude Code:
 
 ```bash
-python3 hero_board.py --autostart on            # install (opens --office)
-python3 hero_board.py --autostart on --list     # or pick another mode
+python3 hero_board.py --autostart on            # install (opens --pixel)
+python3 hero_board.py --autostart on --office    # or pick another mode
 python3 hero_board.py --autostart off           # remove
 python3 hero_board.py --autostart status
 ```
 
 It adds one `SessionStart` hook that runs `hero_board.py --ensure <mode>`
-(default **`--office`**; pass `--list` or `--scene` to change it), which opens
+(default **`--pixel`** — the emoji office, TUI fallback; pass `--office`,
+`--list`, or `--scene` to change it), which opens
 a new terminal window (iTerm2 or Terminal) — but **only if a board isn't
 already running** (singleton, so extra Claude Code windows never stack more
 boards). It backs up `settings.json` and leaves every other hook untouched;
