@@ -18,7 +18,8 @@ Usage:
   python3 hero_board.py --list     # dense one-row-per-session mode
   python3 hero_board.py --demo     # fake fleet (no Claude Code needed)
   python3 hero_board.py --once     # print a single frame and exit
-  python3 hero_board.py --autostart on   # auto-open the board when Claude Code starts
+  python3 hero_board.py --autostart on   # auto-open --office when Claude Code starts
+                                         #   (add --list/--scene to pick another mode)
   --fps N (1-30) · --no-notify · keys: q quit, m cycle modes
 
 Data comes from ~/.claude/status-hero/sessions/*.json, written by
@@ -1113,17 +1114,20 @@ def _is_our_autostart(group):
     return "--ensure" in s and "hero_board.py" in s
 
 
-def autostart(state):
-    """Install / remove the SessionStart hook that auto-opens the board. Backs
-    up settings.json, preserves every other hook, idempotent."""
+def autostart(state, mode="--office"):
+    """Install / remove the SessionStart hook that auto-opens the board in a
+    given mode (default --office). Backs up settings.json, preserves every
+    other hook, idempotent."""
     path = _settings_path()
     try:
         with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+            raw = f.read()
+        data = json.loads(raw) if raw.strip() else {}   # empty file == {}
     except FileNotFoundError:
         data = {}
     except Exception as e:
-        sys.stderr.write("autostart: cannot read %s: %s\n" % (path, e))
+        # genuinely malformed JSON — refuse rather than clobber the user's file
+        sys.stderr.write("autostart: cannot parse %s (%s); leaving it untouched\n" % (path, e))
         return 1
     if not isinstance(data, dict):
         sys.stderr.write("autostart: %s is not a JSON object\n" % path)
@@ -1139,8 +1143,9 @@ def autostart(state):
         return 0
     ss = [g for g in ss if not _is_our_autostart(g)]   # idempotent
     if state == "on":
-        cmd = "%s %s --ensure" % (_shq(sys.executable or "python3"),
-                                  _shq(os.path.abspath(__file__)))
+        modeflag = "" if mode == "--scene" else " " + mode   # scene is bare default
+        cmd = "%s %s --ensure%s" % (_shq(sys.executable or "python3"),
+                                    _shq(os.path.abspath(__file__)), modeflag)
         ss.append({"hooks": [{"type": "command", "command": cmd, "timeout": 10}]})
     hooks["SessionStart"] = ss
     data["hooks"] = hooks
@@ -1171,7 +1176,9 @@ def main(argv):
     if "--autostart" in argv:
         i = argv.index("--autostart")
         nxt = argv[i + 1] if i + 1 < len(argv) else ""
-        return autostart(nxt if nxt in ("on", "off", "status") else "status")
+        state = nxt if nxt in ("on", "off", "status") else "status"
+        mode = next((m for m in ("--office", "--list", "--scene") if m in argv), "--office")
+        return autostart(state, mode)
 
     demo = "--demo" in argv
     once = "--once" in argv

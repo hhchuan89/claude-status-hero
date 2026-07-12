@@ -123,16 +123,18 @@ Don't want to remember to open the board? Turn on auto-launch and a single
 board window opens itself whenever you start Claude Code:
 
 ```bash
-python3 hero_board.py --autostart on      # install (opt-in)
-python3 hero_board.py --autostart off     # remove
+python3 hero_board.py --autostart on            # install (opens --office)
+python3 hero_board.py --autostart on --list     # or pick another mode
+python3 hero_board.py --autostart off           # remove
 python3 hero_board.py --autostart status
 ```
 
-It adds one `SessionStart` hook that runs `hero_board.py --ensure`, which
-opens a new terminal window (iTerm2 or Terminal) — but **only if a board
-isn't already running** (singleton, so extra Claude Code windows never stack
-more boards). It backs up `settings.json` and leaves every other hook
-untouched; `hero_line.py`'s own hooks are not affected.
+It adds one `SessionStart` hook that runs `hero_board.py --ensure <mode>`
+(default **`--office`**; pass `--list` or `--scene` to change it), which opens
+a new terminal window (iTerm2 or Terminal) — but **only if a board isn't
+already running** (singleton, so extra Claude Code windows never stack more
+boards). It backs up `settings.json` and leaves every other hook untouched;
+`hero_line.py`'s own hooks are not affected.
 
 ## Install
 
