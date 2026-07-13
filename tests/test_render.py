@@ -710,6 +710,33 @@ p = subprocess.run([PY, "-c", singleton_code], capture_output=True, text=True,
 check("board singleton guard (pidfile) works",
       "singleton-ok" in p.stdout, (p.stderr or p.stdout)[:400])
 
+# ------------------------------------------- 8: rate-limit de-flicker (jumping)
+# Account-wide 5h/7d are cached per-session at different moments; the newest
+# write can hold a stale-low snapshot. account_rl must return the MAX (current
+# value, stable) so the header meter can't jump between windows' snapshots.
+print("== rate-limit de-flicker ==")
+rl_code = """
+import os, sys, importlib.util
+spec = importlib.util.spec_from_file_location('hb', os.path.join(%r, 'hero_board.py'))
+hb = importlib.util.module_from_spec(spec); spec.loader.exec_module(hb)
+S = [
+  {'sid':'a','five':15.0,'five_reset':100,'seven':34.0,'seven_reset':200,'ts':999},
+  {'sid':'b','five':48.0,'five_reset':101,'seven':38.0,'seven_reset':201,'ts':500},
+  {'sid':'c','five':46.0,'five_reset':102,'seven':37.0,'seven_reset':202,'ts':400},
+]
+rl = hb.account_rl(S)
+assert rl['five'] == 48.0, rl          # the max, NOT the newest-ts 15.0
+assert rl['seven'] == 38.0, rl
+assert rl['five_reset'] == 101, rl     # reset paired with the max-five session
+assert hb.account_rl([]) is None
+assert hb.account_rl([{'sid':'x'}]) is None
+print('rl-ok')
+""" % ROOT
+p = subprocess.run([PY, "-c", rl_code], capture_output=True, text=True,
+                   encoding="utf-8", timeout=20)
+check("account_rl returns max snapshot, not newest-ts",
+      "rl-ok" in p.stdout, (p.stderr or p.stdout)[:400])
+
 # ------------------------------------------------------------------ result
 
 print()

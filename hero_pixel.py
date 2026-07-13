@@ -951,17 +951,8 @@ def build_office_model(sessions, now, manager_label=None):
         else:
             resting.append(row)
 
-    rl = None
-    for s in sorted(sessions, key=lambda x: -(_hb.num(x.get("ts")) or 0)):
-        if _hb.num(s.get("five")) is not None:
-            rl = s
-            break
-    gauges = None
-    if rl is not None:
-        gauges = {
-            "five": _hb.num(rl.get("five")), "five_reset": _hb.num(rl.get("five_reset")),
-            "seven": _hb.num(rl.get("seven")), "seven_reset": _hb.num(rl.get("seven_reset")),
-        }
+    # Account-wide 5h/7d, de-flickered across sessions (see hero_board.account_rl).
+    gauges = _hb.account_rl(live)
 
     total = sum(_hb.num(s.get("cost")) or 0 for s in live)
     max_ms = max((_hb.num(s.get("dur_ms")) or 0 for s in live), default=0)
@@ -1068,6 +1059,33 @@ def encode_sixel(fb, palette=None):
 
 
 # ------------------------------------------------------- capability detect
+def _win_read_reply(query, terminators, timeout=0.3):
+    """Windows: write an escape-sequence query to the terminal and read its
+    reply from the console input buffer via msvcrt (there is no termios/select
+    here). Reads until any terminator char or timeout; returns the reply (may
+    be empty). Best-effort — never raises."""
+    try:
+        import msvcrt
+    except Exception:
+        return ""
+    try:
+        sys.stdout.write(query)
+        sys.stdout.flush()
+    except Exception:
+        return ""
+    reply = ""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if msvcrt.kbhit():
+            ch = msvcrt.getwch()
+            reply += ch
+            if ch in terminators:
+                break
+        else:
+            time.sleep(0.005)
+    return reply
+
+
 def detect_sixel():
     """Decision ladder, first hit wins: env override -> isatty gate -> DA1
     probe (bounded, termios always restored) -> iTerm2 env heuristic."""
@@ -1081,6 +1099,15 @@ def detect_sixel():
             return False
     except Exception:
         return False
+    if os.name == "nt":
+        # No termios here. Ask via DA1 through the console (msvcrt); if the
+        # terminal reports sixel (param 4) trust it, otherwise fall back to
+        # "are we in Windows Terminal?" — WT has shipped sixel since v1.22.
+        reply = _win_read_reply("\x1b[c", ("c",))
+        m = re.search(r"\x1b\[\?([0-9;]+)c", reply)
+        if m:
+            return "4" in m.group(1).split(";")
+        return bool(os.environ.get("WT_SESSION"))
     try:
         import termios
         import tty
@@ -1264,6 +1291,17 @@ def _term_pixel_size():
     iTerm2 and most modern terminals report this via TIOCGWINSZ; the values
     are physical pixels, so on a Retina display they're large — which is
     exactly what we want to scale the fixed-size office up to fill."""
+    if os.name == "nt":
+        # No TIOCGWINSZ. Ask the terminal for its window size in pixels via
+        # CSI 14 t -> reply "ESC [ 4 ; <height> ; <width> t". Unknown -> (0,0),
+        # which just means scale factor 1 (base-size office, still renders).
+        reply = _win_read_reply("\x1b[14t", ("t",))
+        m = re.search(r"\x1b\[4;([0-9]+);([0-9]+)t", reply)
+        if m:
+            ypix, xpix = int(m.group(1)), int(m.group(2))
+            if xpix > 0 and ypix > 0:
+                return xpix, ypix
+        return 0, 0
     try:
         import fcntl
         import struct
@@ -1362,11 +1400,19 @@ def run(argv):
             return
         try:
             n = _scale_factor(argv)   # per-frame: adapts to window resize
-            out = sys.stdout.buffer
-            out.write(b"\x1b[?2026h\x1b[H")
-            out.write(encode_sixel(_upscale(fb, n), palette))
-            out.write(b"\x1b[?2026l")
-            out.flush()
+            data = (b"\x1b[?2026h\x1b[H"
+                    + encode_sixel(_upscale(fb, n), palette)
+                    + b"\x1b[?2026l")
+            if os.name == "nt":
+                # Windows console: sys.stdout.buffer is UTF-8-only and does not
+                # reliably pass raw DCS bytes; the text layer (WriteConsoleW)
+                # does. Sixel is pure ASCII, so latin-1 is a 1:1 byte->char map.
+                sys.stdout.write(data.decode("latin-1"))
+                sys.stdout.flush()
+            else:
+                out = sys.stdout.buffer
+                out.write(data)
+                out.flush()
         except Exception:
             pass
 
@@ -1386,6 +1432,12 @@ def run(argv):
         import tty
     except ImportError:
         termios = tty = None
+    msvcrt = None
+    if termios is None and os.name == "nt":
+        try:
+            import msvcrt
+        except ImportError:
+            pass
     fd, old = None, None
     if termios is not None:
         try:
@@ -1414,15 +1466,22 @@ def run(argv):
                 emit_sixel(fb, palette)
                 last_render = now_m
                 dirty = False
-            r = []
+            ch = None
             if termios is not None and old is not None:
                 r, _, _ = select.select([sys.stdin], [], [], 0.5)
+                if r:
+                    ch = sys.stdin.read(1)
+            elif msvcrt is not None:
+                deadline = time.monotonic() + 0.5
+                while time.monotonic() < deadline:
+                    if msvcrt.kbhit():
+                        ch = msvcrt.getwch()
+                        break
+                    time.sleep(0.02)
             else:
                 time.sleep(0.5)
-            if r:
-                ch = sys.stdin.read(1)
-                if ch in ("q", "Q", "\x03"):
-                    break
+            if ch in ("q", "Q", "\x03"):
+                break
     except KeyboardInterrupt:
         pass
     finally:

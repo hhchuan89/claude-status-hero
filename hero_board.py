@@ -505,6 +505,30 @@ def demo_fleet(frame):
 
 # ----------------------------------------------------------------- renderer
 
+def account_rl(sessions):
+    """The account-wide 5h/7d rate limits, de-flickered.
+
+    These percentages are account-global, but each session caches its OWN
+    snapshot taken at a different moment (a hook write can bump a session's ts
+    without refreshing its rate-limit numbers). Picking "the newest-written
+    session's snapshot" therefore makes the meter jump between windows — one
+    may hold a stale 15% while another holds the current 48%. Within a window
+    the true value only climbs, so the MAX across sessions is the current value
+    and it's stable. Each metric's reset is paired with the session that
+    supplied that metric's max. Returns a dict with five/five_reset/seven/
+    seven_reset (values may be None) or None if no session has any yet."""
+    out = {"five": None, "five_reset": None, "seven": None, "seven_reset": None}
+    got = False
+    for key, rkey in (("five", "five_reset"), ("seven", "seven_reset")):
+        cand = [s for s in sessions if num(s.get(key)) is not None]
+        if cand:
+            top = max(cand, key=lambda s: num(s.get(key)))
+            out[key] = num(top.get(key))
+            out[rkey] = num(top.get(rkey))
+            got = True
+    return out if got else None
+
+
 def header(sessions, W, demo, usage=True):
     live = [s for s in sessions if s["_state"] != "ghost"]
     counts = {}
@@ -528,11 +552,7 @@ def header(sessions, W, demo, usage=True):
         # the floor plan is the calm view, so the usage meters are dropped
         return [crop_pad(left, W), GRAY + DIM + ("─" if not ASCII else "-") * W + RESET]
 
-    rl = None
-    for s in sorted(live, key=lambda x: -(num(x.get("ts")) or 0)):
-        if num(s.get("five")) is not None:
-            rl = s
-            break
+    rl = account_rl(live)
     if rl:
         right = ("5h " + bar(rl.get("five"), 8) + " " + zone(num(rl.get("five")))
                  + pct_txt(rl.get("five")) + RESET + DIM + " " + G_RESET_AT
@@ -1364,7 +1384,18 @@ def main(argv):
             hp = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(hp)
             if hp.detect_sixel():
-                return hp.run([a for a in argv if a != "--pixel"])
+                # The sixel office runs its OWN loop (hp.run) and never reaches
+                # the TUI board's _write_pidfile below — so register the pidfile
+                # here too, or the singleton guard can't see a pixel board and a
+                # new window stacks on every session. Skip for --once (transient).
+                persist = "--once" not in argv
+                if persist:
+                    _write_pidfile()
+                try:
+                    return hp.run([a for a in argv if a != "--pixel"])
+                finally:
+                    if persist:
+                        _clear_pidfile()
         except Exception:
             pass
         sys.stderr.write(DIM + "--pixel: no sixel support detected, "
