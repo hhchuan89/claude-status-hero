@@ -27,6 +27,14 @@ import tempfile
 import time
 import unicodedata
 
+# Force UTF-8 on our own stdout so redirecting this suite's output on Windows
+# (cp1252 by default) doesn't crash on non-ASCII check names ("SessionStart→
+# working", "茶水间"). Matches what hero_line.py / hero_board.py do.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", newline="")
+except Exception:
+    pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 LINE = os.path.join(ROOT, "hero_line.py")
@@ -79,7 +87,8 @@ def run(script, args=(), stdin="", env_extra=None, cols="100", lines="30"):
     if env_extra:
         env.update(env_extra)
     p = subprocess.run([PY, script] + list(args), input=stdin,
-                       capture_output=True, text=True, timeout=30, env=env)
+                       capture_output=True, text=True, encoding="utf-8",
+                       timeout=30, env=env)
     return p
 
 
@@ -284,9 +293,13 @@ p = subprocess.run([PY, "-c", (
     "spec=importlib.util.spec_from_file_location('hl', %r);"
     "m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m);"
     "out=m.shell_cmd('/usr/bin/python3','/tmp/a$(rm -rf x)/b.py','--hook','X');"
-    "print(out)") % LINE], capture_output=True, text=True, timeout=15)
-check("shell_cmd quotes metachars",
-      "'/tmp/a$(rm -rf x)/b.py'" in p.stdout, p.stdout.strip())
+    "print(out)") % LINE], capture_output=True, text=True, encoding="utf-8",
+    timeout=15)
+# the dangerous path must be quoted so the shell can't execute the $(...) —
+# POSIX shlex uses single quotes, the Windows branch uses double quotes.
+_meta_expect = ('"/tmp/a$(rm -rf x)/b.py"' if os.name == "nt"
+                else "'/tmp/a$(rm -rf x)/b.py'")
+check("shell_cmd quotes metachars", _meta_expect in p.stdout, p.stdout.strip())
 
 # ------------------------------------------------------- 5: board geometry
 
@@ -486,7 +499,7 @@ assert not any('no live sessions' in l for l in lines), 'room vanished'
 print('anim-ok')
 """ % ROOT
 p = subprocess.run([PY, "-c", anim_code], capture_output=True, text=True,
-                   timeout=30)
+                   encoding="utf-8", timeout=30)
 check("office walk anim deterministic + terminates",
       "anim-ok" in p.stdout, (p.stderr or p.stdout)[:400])
 
@@ -617,6 +630,85 @@ check("--style gauge no refreshInterval",
       "refreshInterval" not in json.load(open(sp3))["statusLine"])
 p = run(LINE, ["--style", "bogus", "--settings", sp3], env_extra={"_dir": d3})
 check("--style bogus rejected", p.returncode == 1)
+
+# ------------------------------------------------- 7: auto-launch (--autostart)
+# The board's opt-in SessionStart hook that opens a board window when Claude
+# Code starts. Cross-platform: the hook command must be shell-safe on Windows
+# (forward slashes, no POSIX single-quotes), idempotent, and preserve foreign
+# hooks. The singleton guard (pidfile) must stop a second session stacking a
+# board — tested without opening a real window (launchers monkeypatched).
+
+print("== auto-launch ==")
+tmp_al = tempfile.mkdtemp(prefix="sh-autostart-")
+sp_al = os.path.join(tmp_al, "settings.json")
+json.dump({"hooks": {"SessionStart": [
+    {"hooks": [{"type": "command", "command": "echo keep-me"}]}]}},
+    open(sp_al, "w"))
+
+
+def _autostart(*a):
+    return run(BOARD, ["--autostart"] + list(a),
+               env_extra={"STATUS_HERO_SETTINGS": sp_al})
+
+
+def _ours(groups):
+    return [g for g in groups if "--ensure" in json.dumps(g)
+            and "hero_board.py" in json.dumps(g)]
+
+
+p = _autostart("status")
+check("autostart status off initially", "off" in p.stdout.lower(), p.stdout.strip())
+p = _autostart("on")
+check("autostart on exit0", p.returncode == 0, p.stderr[:200])
+ss_al = json.load(open(sp_al))["hooks"]["SessionStart"]
+ours_al = _ours(ss_al)
+check("autostart adds one --ensure hook", len(ours_al) == 1, json.dumps(ss_al)[:200])
+cmd_al = ours_al[0]["hooks"][0]["command"] if ours_al else ""
+check("autostart hook runs hero_board --ensure",
+      "--ensure" in cmd_al and "hero_board.py" in cmd_al, cmd_al)
+check("autostart preserves foreign SessionStart hook",
+      any("keep-me" in json.dumps(g) for g in ss_al))
+if os.name == "nt":
+    check("autostart hook uses forward-slash path (Windows)", "\\" not in cmd_al, cmd_al)
+    check("autostart hook has no POSIX single-quotes (Windows)", "'" not in cmd_al, cmd_al)
+p = _autostart("status")
+check("autostart status ON after enable", "on" in p.stdout.lower(), p.stdout.strip())
+_autostart("on")   # idempotent: enabling twice keeps exactly one entry
+check("autostart on idempotent (still one)",
+      len(_ours(json.load(open(sp_al))["hooks"]["SessionStart"])) == 1)
+p = _autostart("off")
+check("autostart off exit0", p.returncode == 0, p.stderr[:200])
+ss_al3 = json.load(open(sp_al))["hooks"]["SessionStart"]
+check("autostart off removes our hook", not _ours(ss_al3))
+check("autostart off keeps foreign hook",
+      any("keep-me" in json.dumps(g) for g in ss_al3))
+
+# singleton guard: a live PID in the board pidfile means "already open" (a
+# second session's --ensure must be a no-op); a dead PID does not.
+singleton_code = """
+import sys, os, subprocess, time, importlib.util
+spec = importlib.util.spec_from_file_location('hb', os.path.join(%r, 'hero_board.py'))
+hb = importlib.util.module_from_spec(spec); spec.loader.exec_module(hb)
+pf = hb._pidfile(); os.makedirs(os.path.dirname(pf), exist_ok=True)
+assert hb._board_already_open() is False, 'no pidfile => not open'
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+open(pf, 'w').write(str(child.pid))
+assert hb._pid_alive(child.pid) and hb._board_already_open(), 'live pid => open'
+launched = []
+hb._win_launch_board = lambda *a: launched.append('w')
+hb._mac_launch_board = lambda *a: launched.append('m')
+hb.ensure_board(['--ensure', '--office'])
+assert launched == [], 'must not launch a board while one is open'
+child.terminate(); child.wait(); time.sleep(0.3)
+assert not hb._pid_alive(child.pid), 'terminated child is not alive'
+print('singleton-ok')
+""" % ROOT
+env_s = dict(os.environ)
+env_s["STATUS_HERO_DIR"] = os.path.join(tempfile.mkdtemp(prefix="sh-pid-"), "state")
+p = subprocess.run([PY, "-c", singleton_code], capture_output=True, text=True,
+                   encoding="utf-8", timeout=30, env=env_s)
+check("board singleton guard (pidfile) works",
+      "singleton-ok" in p.stdout, (p.stderr or p.stdout)[:400])
 
 # ------------------------------------------------------------------ result
 

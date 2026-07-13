@@ -158,24 +158,26 @@ at 18 rows even on a huge terminal — dense, not stretched); when it can't fit
 (narrow pane, > 8 sessions) it falls back to the dense list. Try it: `python3
 hero_board.py --demo --office` — a visitor walks in and back out every ~22 s.
 
-### Auto-launch (`--autostart`, macOS)
+### Auto-launch (`--autostart`, macOS + Windows)
 
 Don't want to remember to open the board? Turn on auto-launch and a single
 board window opens itself whenever you start Claude Code:
 
 ```bash
-python3 hero_board.py --autostart on            # install (opens --pixel)
+python3 hero_board.py --autostart on            # install
 python3 hero_board.py --autostart on --office    # or pick another mode
 python3 hero_board.py --autostart off           # remove
 python3 hero_board.py --autostart status
 ```
 
 It adds one `SessionStart` hook that runs `hero_board.py --ensure <mode>`
-(default **`--pixel`** — the emoji office, TUI fallback; pass `--office`,
-`--list`, or `--scene` to change it), which opens
-a new terminal window (iTerm2 or Terminal) — but **only if a board isn't
-already running** (singleton, so extra Claude Code windows never stack more
-boards). It backs up `settings.json` and leaves every other hook untouched;
+(default **`--pixel`** on macOS — the emoji office, TUI fallback — and
+**`--office`** on Windows, since the sixel pixel office needs a macOS-class
+terminal; pass `--office`, `--list`, or `--scene` to change it), which opens
+a new terminal window (iTerm2/Terminal on macOS, Windows Terminal on Windows,
+with a `cmd start` console fallback) — but **only if a board isn't already
+running** (singleton, so extra Claude Code windows never stack more boards).
+It backs up `settings.json` and leaves every other hook untouched;
 `hero_line.py`'s own hooks are not affected.
 
 ## Install

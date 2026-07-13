@@ -19,8 +19,9 @@ Usage:
   python3 hero_board.py --list     # dense one-row-per-session mode
   python3 hero_board.py --demo     # fake fleet (no Claude Code needed)
   python3 hero_board.py --once     # print a single frame and exit
-  python3 hero_board.py --autostart on   # auto-open --pixel when Claude Code starts
-                                         #   (add --office/--list/--scene to pick another mode)
+  python3 hero_board.py --autostart on   # auto-open the board when Claude Code starts
+                                         #   (--pixel on macOS, --office on Windows;
+                                         #    add --office/--list/--scene to override)
   --fps N (1-30) · --no-notify · keys: q quit, m cycle modes
 
 Data comes from ~/.claude/status-hero/sessions/*.json, written by
@@ -54,6 +55,16 @@ STATE_DIR = os.environ.get("STATUS_HERO_DIR") or os.path.join(
     os.path.expanduser("~"), ".claude", "status-hero"
 )
 SESS_DIR = os.path.join(STATE_DIR, "sessions")
+
+# Force UTF-8 I/O; newline="" keeps Windows Python from emitting \r\n. Without
+# this the board's emoji/box-drawing crash on any non-console stdout (a pipe,
+# a redirect, `--once`) under Windows' default cp1252 code page. hero_line.py
+# does the same — the board must match so it renders on Windows too.
+for _stream in (sys.stdin, sys.stdout):
+    try:
+        _stream.reconfigure(encoding="utf-8", newline="")
+    except Exception:
+        pass
 
 RESET = "" if NO_COLOR else "\x1b[0m"
 BOLD = "" if NO_COLOR else "\x1b[1m"
@@ -1045,7 +1056,8 @@ def draw(lines, H):
 # One board window that opens itself when you start Claude Code. `--autostart
 # on` installs a SessionStart hook that runs `hero_board.py --ensure`; --ensure
 # opens a NEW terminal window with the board, but ONLY if one isn't already
-# running (singleton, so sessions never stack windows). macOS/iTerm2 for now.
+# running (singleton, so sessions never stack windows). macOS (iTerm2/Terminal)
+# and Windows (Windows Terminal, `cmd start` fallback) are supported.
 # Fully opt-in — the statusline + board behave exactly as before until you
 # turn it on. hero_line.py's own hooks are never touched.
 
@@ -1054,14 +1066,102 @@ def _shq(s):
     return shlex.quote(s)
 
 
+def shell_cmd(*parts):
+    """Join command parts into a string Claude Code can run as a hook command,
+    quoting per-OS. Mirrors hero_line.py's shell_cmd so the --ensure hook is
+    built exactly the way the (working) statusline hooks are.
+
+    Claude Code runs hook commands through a POSIX shell even on Windows, where
+    an unquoted backslash is an escape ("C:\\Py\\python.exe" -> "C:Pypython.exe":
+    not found). Forward slashes work as path separators in that shell and in
+    cmd.exe, so on Windows we normalise separators and only quote when a part
+    holds something outside the safe set."""
+    out = []
+    for p in parts:
+        if os.name == "nt":
+            p = p.replace("\\", "/")
+            if not re.fullmatch(r"[A-Za-z0-9_\-.:/]+", p):
+                p = '"%s"' % p.replace('"', '""')
+        else:
+            p = _shq(p)
+        out.append(p)
+    return " ".join(out)
+
+
 def _settings_path():
     return os.environ.get("STATUS_HERO_SETTINGS") or \
         os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
 
 
+def _pidfile():
+    return os.path.join(STATE_DIR, "board.pid")
+
+
+def _pid_alive(pid):
+    """Cross-platform best-effort liveness check for a PID."""
+    if not pid or pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            h = k32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+            if not h:
+                return False
+            code = ctypes.c_ulong()
+            ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
+            k32.CloseHandle(h)
+            return bool(ok) and code.value == 259    # STILL_ACTIVE
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _write_pidfile():
+    """The running board records its PID so a later session's --ensure sees it
+    (the singleton signal). Best-effort — never fail the board over it."""
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(_pidfile(), "w") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
+
+
+def _clear_pidfile():
+    try:
+        if int(open(_pidfile()).read().strip()) == os.getpid():
+            os.remove(_pidfile())
+    except Exception:
+        pass
+
+
 def _board_already_open():
-    """True if a real board process is already running (ignoring the
-    short-lived --ensure/--autostart helpers) — the singleton guard."""
+    """True if a real board window is already running — the singleton guard, so
+    extra Claude Code sessions never stack more boards.
+
+    Primary signal (all platforms): a live PID in the board pidfile, written by
+    the interactive board itself. On Windows this is the only mechanism (no
+    pgrep). On macOS/Linux we also fall back to a pgrep scan, so a board started
+    before pidfiles existed still counts (the short-lived --ensure/--autostart
+    helpers are ignored)."""
+    try:
+        with open(_pidfile()) as f:
+            pid = int(f.read().strip())
+        if pid != os.getpid() and _pid_alive(pid):
+            return True
+    except Exception:
+        pass
+    if os.name == "nt":
+        return False
     try:
         out = subprocess.run(["pgrep", "-fl", "hero_board.py"],
                              capture_output=True, text=True, timeout=3).stdout
@@ -1091,11 +1191,19 @@ def ensure_board(argv):
         return 0
     board = os.path.abspath(__file__)
     py = sys.executable or "python3"
-    extra = " ".join(a for a in argv if a != "--ensure")
-    cmd = ("%s %s %s" % (_shq(py), _shq(board), extra)).strip()
-    if sys.platform != "darwin":
-        sys.stderr.write("auto-launch is macOS-only for now — run: %s\n" % cmd)
-        return 0
+    extra = [a for a in argv if a != "--ensure"]     # mode flags, e.g. --office
+    if sys.platform == "darwin":
+        return _mac_launch_board(py, board, extra)
+    if os.name == "nt":
+        return _win_launch_board(py, board, extra)
+    cmd = " ".join(_shq(a) for a in [py, board] + extra)
+    sys.stderr.write("auto-launch: unsupported platform — run: %s\n" % cmd)
+    return 0
+
+
+def _mac_launch_board(py, board, extra):
+    """macOS: open the board in a new iTerm2/Terminal window via osascript."""
+    cmd = " ".join(_shq(a) for a in [py, board] + extra)
     esc = cmd.replace("\\", "\\\\").replace('"', '\\"')
     # Open the window BIG from the first frame. The sixel office sizes itself to
     # the terminal's pixel dimensions, so a default 80x24 window renders a tiny
@@ -1140,6 +1248,33 @@ def ensure_board(argv):
     return 0
 
 
+def _win_launch_board(py, board, extra):
+    """Windows: open the board in a fresh Windows Terminal window (falling back
+    to a plain console via `start`). The command is passed as a real argv list
+    so the subprocess layer quotes it — no shell-escaping games. Best-effort:
+    never raises, so it can't break the SessionStart hook. Sizing is left to the
+    terminal; the TUI office adapts to whatever window size it gets."""
+    child = [py, board] + list(extra)
+    attempts = []
+    wt = shutil.which("wt.exe") or shutil.which("wt")
+    if wt:
+        # -w _new forces a brand-new window (not a tab in the current one);
+        # --title labels it. The board runs directly, so the window closes when
+        # you quit with `q`.
+        attempts.append([wt, "-w", "_new", "--title", "claude-status-hero"] + child)
+    # `cmd /c start "" ...` opens a new console window — universal fallback for
+    # machines without Windows Terminal. "" is the (empty) window title.
+    attempts.append(["cmd", "/c", "start", "", py, board] + list(extra))
+    for launch in attempts:
+        try:
+            subprocess.Popen(launch, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return 0
+        except Exception:
+            continue
+    return 0
+
+
 def _is_our_autostart(group):
     s = json.dumps(group)
     return "--ensure" in s and "hero_board.py" in s
@@ -1174,9 +1309,12 @@ def autostart(state, mode="--pixel"):
         return 0
     ss = [g for g in ss if not _is_our_autostart(g)]   # idempotent
     if state == "on":
-        modeflag = "" if mode == "--scene" else " " + mode   # scene is bare default
-        cmd = "%s %s --ensure%s" % (_shq(sys.executable or "python3"),
-                                    _shq(os.path.abspath(__file__)), modeflag)
+        # Always write an explicit mode so the hook is unambiguous (and so the
+        # OS-aware default in main() can't silently override the chosen mode).
+        # shell_cmd() quotes per-OS — on Windows it emits forward-slash paths
+        # the hook shell can run, matching hero_line.py's own hooks.
+        cmd = shell_cmd(sys.executable or "python3",
+                        os.path.abspath(__file__), "--ensure", mode)
         ss.append({"hooks": [{"type": "command", "command": cmd, "timeout": 10}]})
     hooks["SessionStart"] = ss
     data["hooks"] = hooks
@@ -1208,7 +1346,10 @@ def main(argv):
         i = argv.index("--autostart")
         nxt = argv[i + 1] if i + 1 < len(argv) else ""
         state = nxt if nxt in ("on", "off", "status") else "status"
-        mode = next((m for m in ("--pixel", "--office", "--list", "--scene") if m in argv), "--pixel")
+        # --pixel needs sixel (Apple-emoji office); Windows terminals can't show
+        # it, so default Windows auto-launch to the TUI office instead.
+        default_mode = "--office" if os.name == "nt" else "--pixel"
+        mode = next((m for m in ("--pixel", "--office", "--list", "--scene") if m in argv), default_mode)
         return autostart(state, mode)
 
     # --pixel: the emoji pixel office (top priority). If the terminal can show
@@ -1289,6 +1430,7 @@ def main(argv):
             tty.setcbreak(fd)
         except Exception:
             old_attrs = None
+    _write_pidfile()          # singleton signal for a later session's --ensure
     sys.stdout.write("\x1b[?1049h\x1b[?25l")
     try:
         while True:
@@ -1317,6 +1459,7 @@ def main(argv):
     except KeyboardInterrupt:
         pass
     finally:
+        _clear_pidfile()
         sys.stdout.write("\x1b[?25h\x1b[?1049l")
         sys.stdout.flush()
         if termios and old_attrs is not None:
