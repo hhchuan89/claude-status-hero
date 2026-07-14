@@ -81,7 +81,7 @@ def _user_display_name():
     if not full:
         return MANAGER_LABEL
     if len(full) <= 12:
-        return full                           # "HOH CHUAN" — fits the plate
+        return full                           # a short full name fits the plate
     return full.split()[0][:12]               # long name -> first token only
 
 ESCALATE_AMBER_MIN = 15   # long-wait escalation tier 1 (amber)
@@ -1229,18 +1229,18 @@ def demo_fleet(now=None):
         return base
 
     return [
-        mk(0, "sightlab", "fox", "working", ctx=91, cost=31.26, dur_ms=95 * 60000,
+        mk(0, "acme-api", "fox", "working", ctx=91, cost=31.26, dur_ms=95 * 60000,
            activity="Bash: pytest -q tests/"),
-        mk(1, "invest-sight", "cat", "needs_you", cost=4.10, dur_ms=40 * 60000,
+        mk(1, "web-app", "cat", "needs_you", cost=4.10, dur_ms=40 * 60000,
            state_ts=t - 12 * 60, need="permission", activity="Edit: main.py"),
-        mk(2, "market-notes", "rabbit", "needs_you", cost=6.75, dur_ms=22 * 60000,
+        mk(2, "data-sync", "rabbit", "needs_you", cost=6.75, dur_ms=22 * 60000,
            state_ts=t - 18 * 60, need="waiting for you"),
-        mk(3, "chart-lab", "bear", "needs_you", cost=1.20, dur_ms=15 * 60000,
+        mk(3, "api-gateway", "bear", "needs_you", cost=1.20, dur_ms=15 * 60000,
            state_ts=t - 35 * 60, need="permission", activity="Bash: rm -rf build"),
-        mk(4, "daily-news", "frog", "idle", cost=12.55, dur_ms=38 * 60000, state_ts=t - 120),
-        mk(5, "onchain-sight", "owl", "idle", cost=3.30, dur_ms=50 * 60000, state_ts=t - 1800),
-        mk(6, "claude-status-hero", "penguin", "compacting", cost=22.40, dur_ms=70 * 60000),
-        mk(7, "agent-town", "duck", "ghost", cost=15.90, dur_ms=200 * 60000),
+        mk(4, "auth-service", "frog", "idle", cost=12.55, dur_ms=38 * 60000, state_ts=t - 120),
+        mk(5, "search-index", "owl", "idle", cost=3.30, dur_ms=50 * 60000, state_ts=t - 1800),
+        mk(6, "billing-svc", "penguin", "compacting", cost=22.40, dur_ms=70 * 60000),
+        mk(7, "mobile-app", "duck", "ghost", cost=15.90, dur_ms=200 * 60000),
     ]
 
 
@@ -1286,6 +1286,9 @@ def _dump_png(fb, path, palette=None):
             pass
 
 
+_WIN_PIXEL_SIZE = None   # memoized Windows terminal pixel size (see _term_pixel_size)
+
+
 def _term_pixel_size():
     """(xpixel, ypixel) of the terminal's content area, or (0, 0) if unknown.
     iTerm2 and most modern terminals report this via TIOCGWINSZ; the values
@@ -1295,13 +1298,24 @@ def _term_pixel_size():
         # No TIOCGWINSZ. Ask the terminal for its window size in pixels via
         # CSI 14 t -> reply "ESC [ 4 ; <height> ; <width> t". Unknown -> (0,0),
         # which just means scale factor 1 (base-size office, still renders).
-        reply = _win_read_reply("\x1b[14t", ("t",))
-        m = re.search(r"\x1b\[4;([0-9]+);([0-9]+)t", reply)
-        if m:
-            ypix, xpix = int(m.group(1)), int(m.group(2))
-            if xpix > 0 and ypix > 0:
-                return xpix, ypix
-        return 0, 0
+        #
+        # CACHED: this probe reads the console input queue (msvcrt), the SAME
+        # queue run()'s keyboard loop polls for `q`. _scale_factor() calls us
+        # once per rendered frame; probing every frame would swallow keystrokes
+        # typed during the 0.3 s read window (q lost) and add up to 0.3 s of
+        # latency per frame. So probe ONCE and memoize — the office won't
+        # rescale on a Windows resize, but the quit key stays responsive.
+        # (Unix below is a free ioctl, so it stays per-frame and resize-adaptive.)
+        global _WIN_PIXEL_SIZE
+        if _WIN_PIXEL_SIZE is None:
+            _WIN_PIXEL_SIZE = (0, 0)
+            reply = _win_read_reply("\x1b[14t", ("t",))
+            m = re.search(r"\x1b\[4;([0-9]+);([0-9]+)t", reply)
+            if m:
+                ypix, xpix = int(m.group(1)), int(m.group(2))
+                if xpix > 0 and ypix > 0:
+                    _WIN_PIXEL_SIZE = (xpix, ypix)
+        return _WIN_PIXEL_SIZE
     try:
         import fcntl
         import struct

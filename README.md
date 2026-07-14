@@ -18,7 +18,7 @@ everything else is pure stdlib.)
 | `hero_line.py` | the **gauge** — a fixed 3-line statusline | inside every Claude Code window |
 | `hero_board.py` | the **game** — an animated fleet dashboard | its own terminal pane |
 
-![hero_board](preview/hero-board.svg)
+![hero_pixel_office](preview/hero-pixel-office.svg)
 
 ![hero_line](preview/hero-line.svg)
 
@@ -36,14 +36,14 @@ Physics said no ([docs/DESIGN.md](docs/DESIGN.md) has the autopsy):
 So v2 splits it: the statusline is a *gauge* — exactly 3 lines, every line
 padded to an exact display width, alignment computed with ANSI-aware
 East-Asian-Width rules, missing data rendered as dim placeholders instead of
-dropped rows. The *game* — pixel-art heroes, pillars, blinking beacons, real
-frame rate — lives in `hero_board.py`, a proper alt-screen TUI where 4+ fps is
-trivial.
+dropped rows. The *game* — a pixel-art office of animal heroes, live state
+beacons, real frame rate — lives in `hero_board.py`, a proper alt-screen TUI
+where 4+ fps is trivial.
 
 ## The gauge (statusline)
 
 ```
-sightlab [Fable 5] ⎇ main·2              xhigh · $14.79 · 1h36m
+acme-api [Fable 5] ⎇ main·2              xhigh · $14.79 · 1h36m
 5h ░░░░░░░░░░.░░░░░░░🦊░⭐░░░░░⭐░░░░░░🏁  55% ↻2h11m
 ctx ████████░░░░ 64% 128/200k · 7d █████░░░░░ 48% ↻3d0h · ⚡2 ❗1
 ```
@@ -63,7 +63,7 @@ ctx ████████░░░░ 64% 128/200k · 7d █████░�
 
 ```bash
 python3 hero_line.py --style list     # 7 lines: gauge + one row per session
-python3 hero_line.py --style fleet    # 10 lines: the board's pixel scene, static
+python3 hero_line.py --style fleet    # 10 lines: gauge + a static pixel fleet
 python3 hero_line.py --style gauge    # back to the 3-line default
 ```
 
@@ -79,19 +79,22 @@ beacons are steady, not blinking). The animated version is and stays
 
 ## The board (fleet dashboard)
 
-Open a spare pane, run `python3 hero_board.py`, keep it in the corner:
+Open a spare pane, run `python3 hero_board.py`, keep it in the corner. It's an
+**office**: every live session is a desk with its animal hero, the ones that
+flip to **NEEDS YOU** queue in the **manager room** (longest wait first), and
+idle ones drift to the **pantry**. Beacons mark state — ⚡ working · ❗ needs
+you (notifies) · 💤 idle · 🌀 compacting · 👻 stale — each desk carries its
+last activity + cost, and the header has account-wide 5h/7d meters + total cost.
 
-- one **pixel-art hero per live session** — big enough to actually see
-- each stands on a **pillar = its context %** (red pillar ≈ compaction soon)
-- state beacons: ⚡ working (hero trots) · ❗ **NEEDS YOU** (blinks, name
-  inverted, macOS notification / Windows beep) · 💤 idle · 🌀 compacting ·
-  👻 stale
-- last activity per session: `you: fix the tests…`, `Bash: pytest -q…` —
-  so you know *which* window to jump to and *why*
-- header: account-wide 5h/7d meters, Σ cost, live count
-- `m` cycles scene → list → office; `q` quits; `--fps 8` for smoother motion
+It draws two ways, chosen automatically:
 
-![hero_board list](preview/hero-board-list.svg)
+- **`--pixel`** — the emoji pixel office, real sixel graphics (the default
+  wherever the terminal can show sixel).
+- **`--office`** — a half-block TUI office it falls back to when sixel isn't
+  available; same rooms, typed instead of drawn.
+
+`q` quits; `--fps 8` for smoother motion. A bare `python3 hero_board.py` opens
+whichever the terminal can show.
 
 ### The pixel office (`--pixel`) — the main view
 
@@ -103,8 +106,6 @@ via Pillow when it's importable; a stdlib sprite otherwise). It's
 **event-driven, not animated**: sessions teleport between rooms as their state
 changes, and a new frame is drawn only when a session file changes or the clock
 ticks a minute.
-
-![hero_pixel_office](preview/hero-pixel-office.svg)
 
 ```bash
 python3 hero_board.py --pixel            # emoji office, live fleet
@@ -173,7 +174,7 @@ python3 hero_board.py --autostart status
 It adds one `SessionStart` hook that runs `hero_board.py --ensure <mode>`
 (default **`--pixel`** on macOS — the emoji office, TUI fallback — and
 **`--office`** on Windows, since the sixel pixel office needs a macOS-class
-terminal; pass `--office`, `--list`, or `--scene` to change it), which opens
+terminal; pass `--pixel` or `--office` to override), which opens
 a new terminal window (iTerm2/Terminal on macOS, Windows Terminal on Windows,
 with a `cmd start` console fallback) — but **only if a board isn't already
 running** (singleton, so extra Claude Code windows never stack more boards).

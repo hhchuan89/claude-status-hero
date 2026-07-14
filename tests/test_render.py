@@ -305,10 +305,10 @@ check("shell_cmd quotes metachars", _meta_expect in p.stdout, p.stdout.strip())
 
 print("== hero_board ==")
 for cols, rows in (("60", "15"), ("100", "30"), ("200", "50")):
-    for mode in ([], ["--list"], ["--office"]):
+    for mode in ([], ["--office"]):
         for ev in ({}, {"STATUS_HERO_ASCII": "1"}):
             tag = "board cols=%s rows=%s %s%s" % (
-                cols, rows, mode[0][2:] if mode else "scene",
+                cols, rows, mode[0][2:] if mode else "default",
                 " ascii" if ev else "")
             p = run(BOARD, ["--demo", "--once"] + mode, env_extra=dict(ev),
                     cols=cols, lines=rows)
@@ -336,7 +336,7 @@ json.dump({"sid": "gone", "ended": True, "ts": now},       # fresh tombstone
           open(os.path.join(sess2, "gone.json"), "w"))
 json.dump({"sid": "gone2", "ended": True, "ts": now - 120},  # aged tombstone
           open(os.path.join(sess2, "gone2.json"), "w"))
-p = run(BOARD, ["--once", "--list"], env_extra={"_dir": state_dir2},
+p = run(BOARD, ["--once", "--office"], env_extra={"_dir": state_dir2},
         cols="120", lines="30")
 out = ANSI.sub("", p.stdout)
 check("board hides day-old corpse", "corpse" not in out)
@@ -363,8 +363,8 @@ json.dump({"sid": "types", "dir": "types", "hero": ["cat"], "state": {"x": 1},
           open(os.path.join(sessH, "types.json"), "w"))
 json.dump({"sid": ["evil"], "dir": "evil", "ts": now},   # unhashable sid
           open(os.path.join(sessH, "badsid.json"), "w"))
-for mode in ([], ["--list"], ["--office"]):
-    mname = mode[0][2:] if mode else "scene"
+for mode in ([], ["--office"]):
+    mname = mode[0][2:] if mode else "default"
     p = run(BOARD, ["--once"] + mode, env_extra={"_dir": state_dirH},
             cols="100", lines="30")
     outl = [ln for ln in p.stdout.split("\n") if ln != ""]
@@ -374,7 +374,7 @@ for mode in ([], ["--list"], ["--office"]):
           {disp_width(ln) for ln in outl} == {99},
           "got %s" % sorted({disp_width(ln) for ln in outl}))
 
-# CJK names/activity must not shear scene lanes (review regression)
+# CJK names/activity must not shear office columns (review regression)
 state_dir3 = os.path.join(tempfile.mkdtemp(prefix="sh-cjk-"), "state")
 sess3 = os.path.join(state_dir3, "sessions")
 os.makedirs(sess3)
@@ -387,8 +387,8 @@ for i, (sid, d_, act) in enumerate((
                "started_at": now - i, "ctx": 40 + i * 20, "cost": 5.0,
                "activity": act},
               open(os.path.join(sess3, sid + ".json"), "w"))
-for mode in ([], ["--list"], ["--office"]):
-    mname = mode[0][2:] if mode else "scene"
+for mode in ([], ["--office"]):
+    mname = mode[0][2:] if mode else "default"
     p = run(BOARD, ["--once"] + mode, env_extra={"_dir": state_dir3},
             cols="100", lines="30")
     outl = [ln for ln in p.stdout.split("\n") if ln != ""]
@@ -405,7 +405,7 @@ p = run(BOARD, ["--demo", "--once", "--office"], cols="100", lines="30")
 plain = ANSI.sub("", p.stdout)
 check("office draws the room", "┌" in plain and "└" in plain and "│" in plain)
 check("office has a break room (茶水间)", "茶水间" in plain, plain[:400])
-check("office shows a desk name plate", "sightlab" in plain, plain[:400])
+check("office shows a desk name plate", "acme-api" in plain, plain[:400])
 check("office actor is the statusline hero glyph", "🦊" in p.stdout, p.stdout[:400])
 check("office shows a state beacon", "⚡" in p.stdout, p.stdout[:400])
 check("office shows per-desk cost", "$31.26" in plain, plain[:400])
@@ -422,11 +422,6 @@ door_rows = [ln for ln in plain.split("\n")
 check("office has a door gap in the left wall", len(door_rows) >= 3,
       "got %d" % len(door_rows))
 
-# scene mode keeps the full header (5h/7d) — only office trims it; a wide
-# terminal is needed since the 5h/7d block is dropped when it wouldn't fit
-p = run(BOARD, ["--demo", "--once"], cols="200", lines="30")
-check("scene header keeps the 5h/7d usage block",
-      "5h" in ANSI.sub("", p.stdout), p.stdout[:400])
 p = run(BOARD, ["--demo", "--once", "--office"], cols="100", lines="15")
 check("office short terminal falls back (no room)",
       "┌" not in ANSI.sub("", p.stdout))
@@ -503,8 +498,9 @@ p = subprocess.run([PY, "-c", anim_code], capture_output=True, text=True,
 check("office walk anim deterministic + terminates",
       "anim-ok" in p.stdout, (p.stderr or p.stdout)[:400])
 
-# narrow list mode must not truncate the cost column (review regression)
-p = run(BOARD, ["--demo", "--once", "--list"], cols="60", lines="20")
+# a narrow office falls back to the dense list — the cost column must not
+# truncate there (review regression)
+p = run(BOARD, ["--demo", "--once", "--office"], cols="60", lines="20")
 plain = ANSI.sub("", p.stdout)
 check("board narrow list cost intact",
       len(re.findall(r"\$\s*\d+\.\d\d", plain)) >= 5, plain[:200])
@@ -515,7 +511,7 @@ for mode in ([], ["--office"]):
             env_extra={"STATUS_HERO_ASCII": "1"}, cols="100", lines="30")
     plain = ANSI.sub("", p.stdout)
     nonascii = sorted({c for c in plain if ord(c) > 127})
-    check("board ASCII %s pure ascii" % (mode[0][2:] if mode else "scene"),
+    check("board ASCII %s pure ascii" % (mode[0][2:] if mode else "default"),
           not nonascii, repr(nonascii[:10]))
 p = run(LINE, stdin=payload(), env_extra={"STATUS_HERO_ASCII": "1"}, cols="100")
 plain = ANSI.sub("", p.stdout)
@@ -535,9 +531,9 @@ def fleet_dir(with_sessions=True):
     if with_sessions:
         t = time.time()
         for i, (sid, dn, hero, st) in enumerate((
-                ("s0", "sightlab", "fox", "working"),
+                ("s0", "acme-api", "fox", "working"),
                 ("s1", "深度研究项目", "cat", "needs_you"),
-                ("s2", "daily-news", "frog", "idle"))):
+                ("s2", "data-sync", "frog", "idle"))):
             with open(os.path.join(d, "sessions", sid + ".json"), "w") as f:
                 json.dump({"sid": sid, "dir": dn, "hero": hero, "state": st,
                            "state_ts": t, "ts": t, "started_at": t - 100 + i,

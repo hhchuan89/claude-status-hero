@@ -42,7 +42,7 @@ width `W = clamp(40, COLUMNS-2, 100)`. Missing data renders as dim `--`
 placeholders — a row is never dropped.
 
 ```
-sightlab [Fable 5] ⎇ main·2        xhigh · $14.79 · 46m
+acme-api [Fable 5] ⎇ main·2        xhigh · $14.79 · 46m
 5h ░░░░░🦊░⭐░░░░⭐░░░░░🏁 34% ↻2h13m
 ctx ████████░░░░ 42% 84/200k · 7d ███░░░░░░░ 31% ↻2d4h · ⚡2 ❗1
 ```
@@ -75,15 +75,20 @@ ctx ████████░░░░ 42% 84/200k · 7d ███░░░░
 ## hero_board.py — the game (own pane)
 
 A real terminal app: alt-screen, hidden cursor, 4 fps default, `q` quits.
-Two modes:
+It's an **office** floor plan — one view, two ways to draw it (picked
+automatically; default is `--pixel` on macOS, `--office` on Windows):
 
-- **scene** (default): each live session is a pixel-art animal (half-block,
-  ~10×8 px — actually legible at this size) standing on a **pillar whose height
-  is its context %**, state beacon above (⚡ bobbing = working, ❗ blinking =
-  needs you, 💤 = idle, 🌀 = compacting, ✅ = done), name/ctx/cost below.
-  Header HUD: account-wide 5h + 7d bars, Σ cost, live-session count.
-- **list**: dense one-row-per-session mode (name, state, last activity,
-  ctx bar, cost) for >8 sessions or narrow panes.
+- **`--pixel`**: a 1040×600 pixel-art office rendered to a bitmap and blitted
+  via a hand-rolled sixel encoder (see hero_pixel.py) — emoji heroes baked to
+  pixels (Pillow when importable, stdlib sprites otherwise). Falls back to
+  `--office` automatically when the terminal can't show sixel.
+- **`--office`**: a half-block TUI office — same rooms (desks, a manager-room
+  queue sorted longest-wait-first, a pantry), typed not drawn. A narrow pane or
+  >8 sessions falls back further to a dense one-row-per-session list.
+
+Each session shows a state beacon (⚡ working, ❗ needs you, 💤 idle,
+🌀 compacting, 👻 stale) plus name + last activity + cost; the header HUD has
+account-wide 5h + 7d bars, total cost, and the live-session count.
 
 **Last activity** comes from hooks: last prompt snippet (UserPromptSubmit) or
 last tool (`PostToolUse` → "Bash: pytest -q…"). That answers "which window is
@@ -174,8 +179,8 @@ An emoji is width-2/height-1 in the `Stage` compositor (vs. the sprite's
   plate** (width-cropped via `wcrop`, a new display-width-aware crop that
   appends `..` — CJK names must never overflow), and a **status row** = state
   beacon + `cost so far` (`⚡ $31.26`). That is the entire per-agent data
-  surface: **name + state + cost. No ctx %, no usage meters, no pillar** —
-  those already live in the statusline and in list mode; a `%` character
+  surface: **name + state + cost. No ctx %, no usage meters** — those
+  already live in the statusline; a `%` character
   never appears anywhere in office output.
 - **Speech bubble**: for a *seated, not-walking* actor whose state is
   `working`/`compacting`/`needs_you` and has a non-empty `activity`, a
@@ -189,7 +194,7 @@ An emoji is width-2/height-1 in the `Stage` compositor (vs. the sprite's
 - **Furniture** (fixed position, no randomness — `--once` stays byte-stable):
   a door `🚪` beside the wall gap, a wall clock `🕐`, potted plants `🪴`, a
   water cooler `🚰` in the break room, a two-row dim rug, and the 茶水间
-  divider — still just a two-word label, not a scene (the old ASCII
+  divider — still just a two-word label (the old ASCII
   coffee-machine box is gone). All furniture is `not ASCII`-gated.
 
 Design invariants:
@@ -223,7 +228,7 @@ Design invariants:
   room height `rh = min(IH, 18)` — rows below `rh` are simply not emitted, so
   a big terminal gets a dense room, not a stretched-empty one. Fallback rule
   is unchanged: needs `IH ≥ 15` and `n·12 ≤ IW`; doesn't fit / > 8 sessions →
-  falls back to the dense list, same as scene's overflow rule.
+  falls back to the dense list when it can't fit.
 - **Columns are `started_at`-ordered and recomputed each frame**, so a session
   leaving mid-row shifts the others (they walk to the new column) and a board
   restart re-derives the order. NOT sticky across membership changes — don't

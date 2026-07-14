@@ -4,25 +4,24 @@
 A real terminal dashboard for ALL your Claude Code windows. Run it in its own
 iTerm2/tmux pane and glance at the whole fleet:
 
-  • one pixel-art animal hero per live session (assigned by hero_line.py)
-  • standing on a pillar whose height = that session's context %
-  • state beacon: ⚡ working (bobs) · ❗ NEEDS YOU (blinks) · 💤 idle
+  • an office: each live session is a desk with its animal hero (assigned by
+    hero_line.py); sessions that flip to NEEDS YOU queue in the manager room
+  • the emoji pixel office (sixel) where the terminal supports it, else a
+    half-block TUI office — same layout, drawn vs. typed
+  • state beacon: ⚡ working · ❗ NEEDS YOU (notifies) · 💤 idle
                   🌀 compacting · 👻 stale/ghost
   • last activity per session ("you: fix the tests…", "Bash: pytest -q…")
   • account-wide 5h / 7d meters + total cost in the header
-  • macOS notification when any session flips to NEEDS YOU
 
 Usage:
-  python3 hero_board.py --pixel    # emoji pixel office (sixel); TUI office if unsupported
-  python3 hero_board.py            # scene mode, 4 fps
-  python3 hero_board.py --office   # office mode: emoji desk pods + walk-in/out (TUI)
-  python3 hero_board.py --list     # dense one-row-per-session mode
+  python3 hero_board.py            # the office: emoji pixel office (sixel) → TUI fallback
+  python3 hero_board.py --pixel    # force the emoji pixel office; TUI office if unsupported
+  python3 hero_board.py --office   # force the half-block TUI office
   python3 hero_board.py --demo     # fake fleet (no Claude Code needed)
   python3 hero_board.py --once     # print a single frame and exit
-  python3 hero_board.py --autostart on   # auto-open the board when Claude Code starts
-                                         #   (--pixel on macOS, --office on Windows;
-                                         #    add --office/--list/--scene to override)
-  --fps N (1-30) · --no-notify · keys: q quit, m cycle modes
+  python3 hero_board.py --autostart on   # auto-open the office when Claude Code starts
+                                         #   (--pixel on macOS, --office on Windows)
+  --fps N (1-30) · --no-notify · keys: q quits
 
 Data comes from ~/.claude/status-hero/sessions/*.json, written by
 hero_line.py (statusline + hooks). Install that first.
@@ -317,7 +316,6 @@ HERO_EMOJI = {"fox": "🦊", "cat": "🐱", "frog": "🐸", "owl": "🦉",
 
 G_SUM = "cost "
 G_RESET_AT = "R " if ASCII else "↻"
-SEP = " - " if ASCII else " · "
 
 STATES = {
     "working":    {"glyph": "⚡", "ascii": "*", "label": "working",    "col": CYAN},
@@ -490,11 +488,11 @@ def demo_fleet(frame):
         "branch": "main",
     }
     out = [
-        mk(0, "sightlab", "working", 52, 31.26, "Bash: pytest -q tests/"),
-        mk(1, "invest-sight", "needs_you", 18, 4.10, "permission: Edit main.py"),
-        mk(2, "daily-news", "idle", 91, 12.55, "you: push the brief"),
-        mk(3, "onchain-sight", "working", 34, 8.02, "Read: abi/router.json"),
-        mk(4, "radar", "compacting", 96, 22.40, "compacting context"),
+        mk(0, "acme-api", "working", 52, 31.26, "Bash: pytest -q tests/"),
+        mk(1, "web-app", "needs_you", 18, 4.10, "permission: Edit main.py"),
+        mk(2, "data-sync", "idle", 91, 12.55, "you: push the brief"),
+        mk(3, "api-gateway", "working", 34, 8.02, "Read: abi/router.json"),
+        mk(4, "auth-service", "compacting", 96, 22.40, "compacting context"),
     ]
     # a scheduled visitor exercises the office walk-in/out (pure in frame:
     # absent at frame 0, so --once and the geometry tests stay byte-stable)
@@ -564,79 +562,6 @@ def header(sessions, W, demo, usage=True):
     gap = W - disp_width(left) - disp_width(right)
     line = left + " " * max(1, gap) + right if gap >= 1 else left
     return [crop_pad(line, W), GRAY + DIM + ("─" if not ASCII else "-") * W + RESET]
-
-
-def render_scene(sessions, W, H, frame, demo):
-    lines = header(sessions, W, demo)
-    if not sessions:
-        return lines + empty_state(W)
-    n = len(sessions)
-    lane_w = max(SPRITE_W + 4, min(22, (W - 2) // n)) if n else W
-    if lane_w * n > W:                       # too many lanes for this width
-        return lines + render_list(sessions, W, H, frame, demo, header_done=True)
-
-    pillar_max = max(3, min(10, H - 13))
-    beacon_r, sprite_r = 1, 4
-    grid_h = beacon_r + sprite_r + pillar_max
-    lanes = [lane_render(s, lane_w, pillar_max, frame) for s in sessions]
-    for r in range(grid_h):
-        lines.append(crop_pad("  " + "".join(l[r] for l in lanes), W))
-    lines.append(GRAY + DIM + ("─" if not ASCII else "-") * W + RESET)
-    for r in range(grid_h, grid_h + 4):
-        lines.append(crop_pad("  " + "".join(l[r] for l in lanes), W))
-    return lines
-
-
-def lane_render(s, lane_w, pillar_max, frame):
-    """One session → beacon+sprite+pillar rows, then 4 text rows. Fixed widths."""
-    st = s["_state"]
-    meta = STATES[st]
-    ctx = num(s.get("ctx"))
-    pillar_h = 0 if ctx is None else max(1, int(round(ctx / 100.0 * pillar_max)))
-    rows = []
-
-    # beacon (blinks for needs_you)
-    beacon = meta["ascii"] if ASCII else meta["glyph"]
-    if st == "needs_you" and frame % 2:
-        beacon = " "
-    rows.append(center(meta["col"] + beacon + RESET, lane_w))
-
-    # air gap above sprite so it "stands" on its pillar (bob = 1-row hop)
-    air = pillar_max - pillar_h
-    spr = sprite_lines(s.get("hero") or "fox", frame, st)
-    bob = 1 if (st == "working" and frame % 2 == 0) else 0
-    col_px = zone(ctx)
-    top = max(0, air - bob)
-    for r in range(4 + pillar_max):
-        if top <= r < top + 4:
-            rows.append(center(spr[r - top], lane_w))
-        elif r >= air + 4:
-            fill_ch = "#" if ASCII else "█"
-            pil = col_px + (DIM if st in ("idle", "ghost") else "") + fill_ch * 4 + RESET
-            rows.append(center(pil, lane_w))
-        else:
-            rows.append(" " * lane_w)
-
-    # text rows (center() measures real display width — CJK names stay aligned)
-    name = sanitize(s.get("dir") or "?", lane_w - 2)
-    if st == "needs_you":
-        rows.append(center(RED + BOLD + INVERT + " " + name + " " + RESET, lane_w))
-    else:
-        rows.append(center(BOLD + name + RESET, lane_w))
-    rows.append(center(meta["col"] + meta["label"] + RESET, lane_w))
-    m = "ctx " + pct_txt(ctx) + "  $" + ("%.0f" % (num(s.get("cost")) or 0))
-    rows.append(center(DIM + m + RESET, lane_w))
-    act = sanitize(s.get("activity") or "", lane_w - 2)
-    rows.append(center(GRAY + act + RESET, lane_w))
-    return rows
-
-
-def center(s, width):
-    w = disp_width(s)   # always measured — char counts lie for CJK/emoji
-    if w >= width:
-        return crop_pad(s, width)
-    lpad = (width - w) // 2
-    return " " * lpad + s + RESET + " " * (width - w - lpad)
 
 
 def render_list(sessions, W, H, frame, demo, header_done=False):
@@ -1369,8 +1294,14 @@ def main(argv):
         # --pixel needs sixel (Apple-emoji office); Windows terminals can't show
         # it, so default Windows auto-launch to the TUI office instead.
         default_mode = "--office" if os.name == "nt" else "--pixel"
-        mode = next((m for m in ("--pixel", "--office", "--list", "--scene") if m in argv), default_mode)
+        mode = next((m for m in ("--pixel", "--office") if m in argv), default_mode)
         return autostart(state, mode)
+
+    # No view flag → the platform default, matching --autostart: the pixel
+    # office on macOS, the TUI office on Windows (whose terminals rarely do
+    # sixel). A bare `hero_board.py` thus opens what auto-launch would.
+    if not any(f in argv for f in ("--pixel", "--office")):
+        argv = argv + (["--office"] if os.name == "nt" else ["--pixel"])
 
     # --pixel: the emoji pixel office (top priority). If the terminal can show
     # sixel graphics we hand off to hero_pixel.py (Apple-emoji office rendered
@@ -1406,8 +1337,8 @@ def main(argv):
 
     demo = "--demo" in argv
     once = "--once" in argv
-    mode = ("office" if "--office" in argv
-            else "list" if "--list" in argv else "scene")
+    # Only one TUI view remains — the office. (--pixel either handed off to the
+    # sixel renderer and returned above, or fell back to --office here.)
     enabled_notify = "--no-notify" not in argv
     fps = 4.0
     if "--fps" in argv:
@@ -1425,14 +1356,9 @@ def main(argv):
         sessions = demo_fleet(frame) if demo else fleet()
         if not demo:
             notify(sessions, enabled_notify)
-        if mode == "office":
-            lines = render_office(sessions, W - 1, H - 1, frame, demo,
-                                  None if once else ostate)
-        else:
-            rend = render_scene if mode == "scene" else render_list
-            lines = rend(sessions, W - 1, H - 1, frame, demo)
-        hint = DIM + "  q quit%sm mode%s%s" % (SEP, SEP, mode) + RESET
-        lines.append(crop_pad(hint, W - 1))
+        lines = render_office(sessions, W - 1, H - 1, frame, demo,
+                              None if once else ostate)
+        lines.append(crop_pad(DIM + "  q quit" + RESET, W - 1))
         return lines, H
 
     enable_vt()
@@ -1484,9 +1410,6 @@ def main(argv):
                 time.sleep(1.0 / fps)   # no raw keyboard: Ctrl-C to quit
             if ch in ("q", "Q", "\x03"):
                 break
-            if ch in ("m", "M"):
-                mode = {"scene": "list", "list": "office",
-                        "office": "scene"}[mode]
     except KeyboardInterrupt:
         pass
     finally:
