@@ -278,6 +278,38 @@ def load_json(path):
         return None
 
 
+# ---- Fable weekly (model-scoped) usage -------------------------------------
+# CC forwards ONLY five_hour/seven_day into the statusline stdin, so a
+# model-scoped weekly window (e.g. Fable) is read from CC's own on-disk cache
+# of GET /api/oauth/usage (~/.claude.json → .cachedUsageUtilization) — read
+# only, no network/tokens; CC refreshes it on its own schedule. Same number as
+# /usage's "Current week (Fable)" bar; mirrors the ai-repo statusline plugin
+# v1.5.0 jq extraction (.utilization.limits[] where kind=="weekly_scoped" and
+# scope.model.display_name in ("Fable", "Fable 5")).
+USAGE_CACHE_FILE = os.path.join(os.path.expanduser("~"), ".claude.json")
+FABLE_STALE_S = 12 * 3600  # '*' suffix when the cached usage snapshot is older
+
+
+def read_fable(now=None):
+    """(pct, stale) for the Fable weekly window, or None when there's no such
+    window / no cache — the segment then hides itself (matches the plugin)."""
+    cache = get(load_json(USAGE_CACHE_FILE), "cachedUsageUtilization")
+    limits = get(cache, "utilization", "limits")
+    if not isinstance(limits, list):
+        return None
+    pct = None
+    for lim in limits:
+        if (isinstance(lim, dict) and lim.get("kind") == "weekly_scoped"
+                and get(lim, "scope", "model", "display_name") in ("Fable", "Fable 5")):
+            pct = num(lim.get("percent"))
+            break
+    if pct is None:
+        return None
+    fetched_ms = num(get(cache, "fetchedAtMs")) or 0
+    stale = (now or time.time()) - fetched_ms / 1000.0 > FABLE_STALE_S
+    return pct, stale
+
+
 def _open_excl(path):
     """Create-only open: never follows a pre-planted symlink, private perms."""
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -472,6 +504,7 @@ def render(data, width=None):
     five_rs = get(data, "rate_limits", "five_hour", "resets_at")
     seven = num(get(data, "rate_limits", "seven_day", "used_percentage"))
     seven_rs = get(data, "rate_limits", "seven_day", "resets_at")
+    fable = read_fable()  # model-scoped weekly; None (segment hidden) if absent
     sid = get(data, "session_id")
 
     branch = sanitize(git_branch(get(data, "workspace", "current_dir")
@@ -529,14 +562,21 @@ def render(data, width=None):
     fleet = fleet_summary(sessions, sid)
     used_k = "" if ctx_used is None or ctx_size is None else \
         " %d/%dk" % (int(ctx_used / 1000), int(ctx_size / 1000))
-    for attempt in range(3):
+    have_fable = fable is not None
+    # Fable is the new/optional meter, so it degrades out FIRST when width is
+    # tight (fleet drops last) — leaving the no-Fable layout byte-identical.
+    for attempt in range(4 if have_fable else 3):
         bw_c, bw_7 = (12, 10) if attempt == 0 else (8, 6)
         seg = [DIM + "ctx " + RESET + bar(ctx, bw_c) + " " + zone(ctx) + pct_txt(ctx) + RESET
                + (DIM + used_k + RESET if attempt == 0 else "")]
         seg.append(DIM + "7d " + RESET + bar(seven, bw_7) + " " + zone(seven) + pct_txt(seven)
                    + RESET + (" " + DIM + G_RESET_AT + fmt_reset(seven_rs) + RESET
                               if attempt == 0 else ""))
-        if fleet and attempt < 2:
+        if have_fable and attempt < 2:
+            fpct, fstale = fable
+            seg.append(DIM + "Fable " + RESET + bar(fpct, bw_7) + " " + zone(fpct)
+                       + pct_txt(fpct) + (DIM + "*" if fstale else "") + RESET)
+        if fleet and attempt < (3 if have_fable else 2):
             seg.append(fleet)
         cand = (DIM + G_SEP + RESET).join(seg)
         if disp_width(cand) <= W:
