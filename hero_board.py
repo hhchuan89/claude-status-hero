@@ -438,9 +438,28 @@ def effective_state(s, now=None):
     return st if st in STATES else "idle"
 
 
+def live_sids():
+    """SessionIds the Claude Code runtime currently tracks as alive.
+    ~/.claude/sessions/<pid>.json is pruned on exit (even X-button closes),
+    so it is an OS-independent liveness oracle — unlike pid_alive(), a no-op
+    on nt. Missing/empty dir -> empty set, and fleet() then skips pruning."""
+    d = os.path.join(os.path.expanduser("~"), ".claude", "sessions")
+    out = set()
+    try:
+        for n in os.listdir(d):
+            if n.endswith(".json"):
+                j = load_json(os.path.join(d, n))
+                if j and isinstance(j.get("sessionId"), str):
+                    out.add(j["sessionId"])
+    except Exception:
+        pass
+    return out
+
+
 def fleet(now=None):
     now = now or time.time()
     out = []
+    live = live_sids()
     try:
         names = sorted(os.listdir(SESS_DIR))
     except Exception:
@@ -469,6 +488,17 @@ def fleet(now=None):
         if now - (num(s.get("ts")) or 0) > 24 * 3600:
             try:
                 os.remove(path)               # day-old corpse: bury it
+            except Exception:
+                pass
+            continue
+        # X-button close: no `ended` tombstone, but the runtime registry has
+        # already dropped it. Bury now instead of a grey ghost for up to 24 h.
+        # `if live` -> skip pruning if the registry was unreadable; the ts>90 s
+        # guard avoids a startup race with a session younger than its registry
+        # entry.
+        if live and s["sid"] not in live and now - (num(s.get("ts")) or 0) > 90:
+            try:
+                os.remove(path)
             except Exception:
                 pass
             continue
