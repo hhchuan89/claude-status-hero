@@ -259,6 +259,15 @@ h.update_session('race', {'cost': 12})
             ansi2svg.main()
         self.assertEqual(out.getvalue().count('<text '), 2)
 
+    def test_unwritable_state_does_not_break_the_statusline(self):
+        with patch.object(hl, 'session_lock', side_effect=PermissionError), patch.object(hl, 'read_fable', return_value=None):
+            rows = hl.render({'session_id': 'readonly'}, 80).split('\n')
+        self.assertEqual([hl.disp_width(row) for row in rows], [78] * 3)
+        Path(hl.SESS_DIR).mkdir(parents=True)
+        Path(hl.sess_path('old')).write_text('{"sid":"old","ended":true,"ts":1}')
+        with patch.object(hl, 'prune_session', side_effect=PermissionError):
+            self.assertEqual(hl.all_sessions(), [])
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

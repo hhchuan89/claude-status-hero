@@ -397,21 +397,24 @@ def session_lock():
 def update_session(sid, updates, resume=False):
     if not sid:
         return
-    with session_lock():
-        path = sess_path(sid)
-        s = load_json(path) or {}
-        if s.get("ended") and not resume:
-            return  # only SessionStart may resume; late hooks stay buried
-        if resume:
-            s.pop("ended", None)
-        s.update(updates)
-        s["sid"] = str(sid)[:80]
-        s["ts"] = time.time()
-        if "hero" not in s:
-            s["hero"] = pick_hero(sid)
-        if "started_at" not in s:
-            s["started_at"] = s["ts"]
-        atomic_write(path, s)
+    try:
+        with session_lock():
+            path = sess_path(sid)
+            s = load_json(path) or {}
+            if s.get("ended") and not resume:
+                return  # only SessionStart may resume; late hooks stay buried
+            if resume:
+                s.pop("ended", None)
+            s.update(updates)
+            s["sid"] = str(sid)[:80]
+            s["ts"] = time.time()
+            if "hero" not in s:
+                s["hero"] = pick_hero(sid)
+            if "started_at" not in s:
+                s["started_at"] = s["ts"]
+            atomic_write(path, s)
+    except OSError:
+        pass  # state persistence must not suppress the gauge
 
 
 def load_config():
@@ -452,7 +455,10 @@ def all_sessions(cleanup=True):
         age = now - (num(s.get("ts")) or 0)
         if s.get("ended") or age > 24 * 3600:
             if cleanup and (age > 24 * 3600 or (s.get("ended") and age > 600)):
-                prune_session(path, s)
+                try:
+                    prune_session(path, s)
+                except OSError:
+                    pass
             continue
         if not isinstance(s.get("state"), str):
             s["state"] = None
