@@ -525,10 +525,14 @@ def term_width():
         return 80
 
 
+def render_width(width=None):
+    return max(1, min((term_width() if width is None else width) - 2, 100))
+
+
 def render(data, width=None):
     """The contract: a CONSTANT number of lines (3 gauge / 10 fleet), each
     EXACTLY W columns wide."""
-    W = max(40, min((width or term_width()) - 2, 100))
+    W = render_width(width)
 
     cwd = get(data, "workspace", "current_dir") or get(data, "cwd") or ""
     if not isinstance(cwd, str):
@@ -1252,7 +1256,7 @@ def main(argv):
             n = {"fleet": 10, "list": 7}.get(load_config().get("style"), 3)
         except Exception:
             n = 3
-        W = max(40, min(term_width() - 2, 100))
+        W = render_width()
         rows = ["status-hero", "(render error — run --doctor)"] + [""] * (n - 2)
         sys.stdout.write("\n".join(crop_pad(row, W) for row in rows) + "\n")
     return 0

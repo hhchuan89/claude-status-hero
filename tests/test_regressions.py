@@ -186,6 +186,13 @@ h.update_session('race', {'cost': 12})
                 self.assertEqual(hl.main([]), 0)
             self.assertEqual([hl.disp_width(row) for row in out.getvalue().splitlines()], [58] * height)
 
+    def test_terminal_narrower_than_forty_does_not_wrap_rows(self):
+        with patch.object(hl, 'read_fable', return_value=None):
+            for width in (1, 2, 3, 10, 20, 39):
+                rows = hl.render({}, width).split('\n')
+                self.assertEqual(len(rows), 3)
+                self.assertTrue(all(hl.disp_width(row) <= width for row in rows))
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

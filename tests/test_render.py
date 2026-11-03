@@ -160,7 +160,7 @@ ENVS = {
 for cols in ("40", "60", "80", "120", "200", "garbage", None):
     exp_w = None
     if cols and cols.isdigit():
-        exp_w = max(40, min(int(cols) - 2, 100))
+        exp_w = max(1, min(int(cols) - 2, 100))
     for pname, pl in PAYLOADS.items():
         for ename, ev in ENVS.items():
             tag = "%s/%s/cols=%s" % (pname, ename, cols)
@@ -569,7 +569,7 @@ for cols in ("60", "100", "200"):
             lines = [ln for ln in p.stdout.split("\n") if ln != ""]
             check(tag + " exit0", p.returncode == 0, p.stderr[:200])
             check(tag + " 10 lines", len(lines) == 10, "got %d" % len(lines))
-            exp_w = max(40, min(int(cols) - 2, 100))
+            exp_w = max(1, min(int(cols) - 2, 100))
             aw = False
             widths = [disp_width(ln, aw) for ln in lines]
             check(tag + " width==%d" % exp_w, widths == [exp_w] * 10,
@@ -615,7 +615,7 @@ for cols in ("60", "100", "200"):
             lines = [ln for ln in p.stdout.split("\n") if ln != ""]
             check(tag + " exit0", p.returncode == 0, p.stderr[:200])
             check(tag + " 7 lines", len(lines) == 7, "got %d" % len(lines))
-            exp_w = max(40, min(int(cols) - 2, 100))
+            exp_w = max(1, min(int(cols) - 2, 100))
             widths = [disp_width(ln) for ln in lines]
             check(tag + " width==%d" % exp_w, widths == [exp_w] * 7,
                   "got %s" % sorted(set(widths)))

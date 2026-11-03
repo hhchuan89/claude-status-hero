@@ -38,7 +38,7 @@ lives where motion is possible.
 ## hero_line.py — the gauge (per window)
 
 Three lines, **always exactly three**, each padded/cropped to an exact display
-width `W = clamp(40, COLUMNS-2, 100)`. Missing data renders as dim `--`
+width `W = clamp(1, COLUMNS-2, 100)`. Missing data renders as dim `--`
 placeholders — a row is never dropped.
 
 ```
