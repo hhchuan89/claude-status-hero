@@ -110,6 +110,36 @@ h.update_session('race', {'cost': 12})
             hl.handle_hook('SessionStart')
         self.assertFalse(hl.load_json(hl.sess_path('end')).get('ended'))
 
+    def test_autostart_uses_private_unique_backups_and_safe_tempfiles(self):
+        self.settings.write_text('{"custom": 1}')
+        victim = self.root / 'victim'
+        victim.write_text('untouched')
+        old_tmp = Path(str(self.settings) + '.tmp.%d' % os.getpid())
+        old_backup = Path(str(self.settings) + '.autostart-backup')
+        old_tmp.symlink_to(victim)
+        old_backup.symlink_to(victim)
+        self.assertEqual(hb.autostart('on'), 0)
+        self.assertEqual(victim.read_text(), 'untouched')
+        self.assertEqual(hb.autostart('off'), 0)
+        backups = list(self.root.glob('settings.json.status-hero-backup-*'))
+        self.assertEqual(len(backups), 2)
+        if os.name != 'nt':
+            self.assertEqual(self.settings.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(all(b.stat().st_mode & 0o777 == 0o600 for b in backups))
+
+    def test_settings_writers_share_a_lock(self):
+        self.settings.write_text('{}')
+        calls = []
+        @contextlib.contextmanager
+        def lock(path):
+            calls.append(path)
+            yield
+        with patch.object(hl, 'settings_lock', lock):
+            hl.install(['--settings', str(self.settings)])
+            hl.uninstall(['--settings', str(self.settings)])
+            hb.autostart('on')
+        self.assertEqual(calls, [str(self.settings)] * 3)
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

@@ -1256,6 +1256,18 @@ def _is_our_autostart(group):
 
 
 def autostart(state, mode="--pixel"):
+    from hero_line import settings_lock
+    if state == "status":
+        return _autostart(state, mode)
+    try:
+        with settings_lock(_settings_path()):
+            return _autostart(state, mode)
+    except Exception as e:
+        sys.stderr.write("autostart: write failed: %s\n" % e)
+        return 1
+
+
+def _autostart(state, mode="--pixel"):
     """Install / remove the SessionStart hook that auto-opens the board in a
     given mode (default --pixel: emoji pixel office, TUI office fallback).
     Backs up settings.json, preserves every other hook, idempotent."""
@@ -1288,15 +1300,9 @@ def autostart(state, mode="--pixel"):
     hooks["SessionStart"] = ss
     data["hooks"] = hooks
     try:
-        d = os.path.dirname(path)
-        if d:
-            os.makedirs(d, exist_ok=True)
-        if os.path.exists(path):
-            shutil.copy2(path, path + ".autostart-backup")
-        tmp = "%s.tmp.%d" % (path, os.getpid())
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, path)
+        from hero_line import backup_settings, atomic_write_pretty
+        backup_settings(path)
+        atomic_write_pretty(path, data)
     except Exception as e:
         sys.stderr.write("autostart: write failed: %s\n" % e)
         return 1

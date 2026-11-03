@@ -958,6 +958,8 @@ def settings_file(argv):
 
 def read_settings(path):
     """Missing settings are new; unreadable/invalid settings must never be reset."""
+    if os.path.islink(path):
+        raise ValueError("settings is a symlink; edit its target explicitly: %s" % path)
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -983,6 +985,21 @@ def backup_settings(path):
             n += 1
 
 
+def settings_lock(path):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), mode=0o700, exist_ok=True)
+    return file_lock(path + ".status-hero.lock", timeout=4)
+
+
+def settings_transaction(fn):
+    from functools import wraps
+    @wraps(fn)
+    def wrapped(argv):
+        with settings_lock(settings_file(argv)):
+            return fn(argv)
+    return wrapped
+
+
+@settings_transaction
 def install(argv):
     path = settings_file(argv)
     me = os.path.abspath(__file__)
@@ -1017,11 +1034,12 @@ def install(argv):
     print("  hooks      : %d events (state for hero_board.py)" % len(HOOK_EVENTS))
     if prev and not (isinstance(prev, dict) and owned_command(prev.get("command"))):
         print("  replaced   : %s" % json.dumps(prev))
-    print("  rollback   : cp '%s' '%s'  (or --uninstall)" % (backup, path))
+    print("  rollback   : %s" % (shell_cmd("cp", backup, path) if backup else "remove the newly created settings file"))
     print("takes effect on the next statusline refresh; open a new Claude Code"
           " window (or send a message) to see it.")
 
 
+@settings_transaction
 def uninstall(argv):
     path = settings_file(argv)
     data = read_settings(path)
