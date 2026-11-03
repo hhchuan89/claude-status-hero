@@ -324,7 +324,7 @@ def _tmp_name(path):
     return "%s.tmp.%d.%d" % (path, os.getpid(), time.time_ns() % 1000000)
 
 
-def atomic_write(path, data):
+def atomic_write(path, data, strict=False):
     tmp = _tmp_name(path)
     try:
         with _open_excl(tmp) as f:
@@ -344,6 +344,8 @@ def atomic_write(path, data):
             os.remove(tmp)
         except Exception:
             pass
+        if strict:
+            raise
 
 
 @contextmanager
@@ -424,7 +426,7 @@ def save_config(updates):
     _ensure_dirs()
     cfg = load_config()
     cfg.update(updates)
-    atomic_write(os.path.join(STATE_DIR, "config.json"), cfg)
+    atomic_write(os.path.join(STATE_DIR, "config.json"), cfg, strict=True)
 
 
 def prune_session(path, snapshot):

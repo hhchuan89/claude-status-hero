@@ -287,6 +287,11 @@ h.update_session('race', {'cost': 12})
                 reader.close()
                 os.close(write_fd)
 
+    def test_config_save_reports_write_failure(self):
+        with patch.object(hl, '_open_excl', side_effect=PermissionError):
+            with self.assertRaises(PermissionError):
+                hl.save_config({'style': 'list'})
+
 
 def run_checks(check):
     class Results(unittest.TestResult):
