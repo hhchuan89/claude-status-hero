@@ -996,7 +996,13 @@ def install(argv):
     backup = backup_settings(path)
 
     prev = data.get("statusLine")
-    data["statusLine"] = {"type": "command", "command": shell_cmd(py, me), "padding": 0}
+    sl = dict(prev) if isinstance(prev, dict) and owned_command(prev.get("command")) else {}
+    sl.update(type="command", command=shell_cmd(py, me), padding=0)
+    if load_config().get("style") in ("fleet", "list"):
+        sl["refreshInterval"] = 2
+    else:
+        sl.pop("refreshInterval", None)
+    data["statusLine"] = sl
 
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):   # null/str/list → start clean (backup exists)
@@ -1187,18 +1193,20 @@ def main(argv):
         if val not in ("fleet", "gauge", "list"):
             print("usage: --style gauge|list|fleet")
             return 1
-        save_config({"style": val})
         path = settings_file(argv)
-        data = read_settings(path)
-        sl = data.get("statusLine")
-        if isinstance(sl, dict) and owned_command(sl.get("command")):
-            if val in ("fleet", "list"):
-                sl["refreshInterval"] = 2   # keep other windows' states fresh
-            else:
-                sl.pop("refreshInterval", None)
-            atomic_write_pretty(path, data)
-            print("statusLine.refreshInterval %s in %s"
-                  % ("→ 2s" if val in ("fleet", "list") else "removed", path))
+        with settings_lock(path):
+            data = read_settings(path)
+            sl = data.get("statusLine")
+            if isinstance(sl, dict) and owned_command(sl.get("command")):
+                if val in ("fleet", "list"):
+                    sl["refreshInterval"] = 2
+                else:
+                    sl.pop("refreshInterval", None)
+                backup_settings(path)
+                atomic_write_pretty(path, data)
+                print("statusLine.refreshInterval %s in %s"
+                      % ("→ 2s" if val in ("fleet", "list") else "removed", path))
+            save_config({"style": val})
         desc = {"gauge": "3 lines: HUD + 5h track + meters",
                 "list": "7 lines: gauge + one compact row per session",
                 "fleet": "10 lines: HUD + 5h track + static fleet scene"}

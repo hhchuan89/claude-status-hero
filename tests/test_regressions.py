@@ -156,6 +156,14 @@ h.update_session('race', {'cost': 12})
         self.assertEqual(args[0], ['python.exe', 'C:/a&b/hero_board.py', '--office'])
         self.assertEqual(kwargs['creationflags'], 0x10)
 
+    def test_reinstall_preserves_style_and_style_edits_have_backup(self):
+        hl.save_config({'style': 'list'})
+        hl.install(['--settings', str(self.settings)])
+        self.assertEqual(json.loads(self.settings.read_text())['statusLine']['refreshInterval'], 2)
+        before = len(list(self.root.glob('settings.json.status-hero-backup-*')))
+        self.assertEqual(hl.main(['--style', 'gauge', '--settings', str(self.settings)]), 0)
+        self.assertEqual(len(list(self.root.glob('settings.json.status-hero-backup-*'))), before + 1)
+
 
 def run_checks(check):
     class Results(unittest.TestResult):
