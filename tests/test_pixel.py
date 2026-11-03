@@ -389,6 +389,19 @@ try:
 except Exception as e:
     check("extreme gauge values do not crash", False, str(e))
 
+# The preview contains local activity text: it must be private and must not
+# follow a predictable temporary-file symlink.
+from pathlib import Path
+private_png = Path(tmpdir) / 'private.png'
+victim = Path(tmpdir) / 'victim'
+victim.write_bytes(b'untouched')
+old_tmp = Path(str(private_png) + '.tmp.%d' % os.getpid())
+old_tmp.symlink_to(victim)
+hp._dump_png(fb, str(private_png))
+check("PNG temp symlink cannot clobber another file", victim.read_bytes() == b'untouched')
+if os.name != 'nt':
+    check("PNG activity preview is private", private_png.stat().st_mode & 0o777 == 0o600)
+
 # ------------------------------------------------------------------ result
 
 print()

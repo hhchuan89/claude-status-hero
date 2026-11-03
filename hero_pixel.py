@@ -1279,12 +1279,14 @@ def _dump_png(fb, path, palette=None):
     d = os.path.dirname(path)
     if d:
         try:
-            os.makedirs(d, exist_ok=True)
+            os.makedirs(d, mode=0o700, exist_ok=True)
         except Exception:
             pass
-    tmp = "%s.tmp.%d" % (path, os.getpid())
+    from hero_line import _tmp_name
+    tmp = _tmp_name(path)
     try:
-        with open(tmp, "wb") as f:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
             f.write(encode_png(fb, palette))
         os.replace(tmp, path)
     except Exception:
