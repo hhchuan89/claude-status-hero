@@ -1140,7 +1140,7 @@ def detect_sixel():
                     r, _, _ = select.select([sys.stdin], [], [], remaining)
                     if not r:
                         break
-                    resp += sys.stdin.read(1)
+                    resp += os.read(fd, 1).decode("ascii", "ignore")
                     if resp.endswith("c"):
                         break
                 m = re.search(r"\x1b\[\?([0-9;]+)c", resp)
@@ -1494,7 +1494,7 @@ def run(argv):
             if termios is not None and old is not None:
                 r, _, _ = select.select([sys.stdin], [], [], 0.5)
                 if r:
-                    ch = sys.stdin.read(1)
+                    ch = os.read(fd, 1).decode("ascii", "ignore")
             elif msvcrt is not None:
                 deadline = time.monotonic() + 0.5
                 while time.monotonic() < deadline:

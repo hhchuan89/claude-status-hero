@@ -1443,7 +1443,7 @@ def main(argv):
             if termios and old_attrs is not None:
                 r, _, _ = select.select([sys.stdin], [], [], 1.0 / fps)
                 if r:
-                    ch = sys.stdin.read(1)
+                    ch = os.read(fd, 1).decode("ascii", "ignore")
             elif msvcrt:
                 deadline = time.monotonic() + 1.0 / fps
                 while time.monotonic() < deadline:

@@ -270,6 +270,23 @@ h.update_session('race', {'cost': 12})
         with patch.object(hl, 'prune_session', side_effect=PermissionError):
             self.assertEqual(hl.all_sessions(), [])
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX terminal probe')
+    def test_da_reply_is_not_lost_in_text_io_buffer(self):
+        import hero_pixel as hp
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+        for reply, expected, heuristic in ((b'\x1b[?1;2c', False, 'iTerm2'), (b'\x1b[?1;2;4c', True, '')):
+            read_fd, write_fd = os.pipe()
+            reader = io.TextIOWrapper(os.fdopen(read_fd, 'rb', buffering=0))
+            try:
+                os.write(write_fd, reply)
+                with patch.object(hp.sys, 'stdin', reader), patch.object(hp.sys, 'stdout', Terminal()), patch('termios.tcgetattr', return_value=[]), patch('termios.tcsetattr'), patch('tty.setcbreak'), patch.dict(os.environ, {'STATUS_HERO_SIXEL': '', 'LC_TERMINAL': heuristic, 'TERM_PROGRAM': ''}):
+                    self.assertEqual(hp.detect_sixel(), expected)
+            finally:
+                reader.close()
+                os.close(write_fd)
+
 
 def run_checks(check):
     class Results(unittest.TestResult):
