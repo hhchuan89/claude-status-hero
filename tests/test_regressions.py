@@ -252,6 +252,13 @@ h.update_session('race', {'cost': 12})
                 track = hl.track(pct, width, 'fox')
                 self.assertEqual(hl.disp_width(track), width, (width, pct))
 
+    def test_svg_export_preserves_trailing_zero_and_m_text(self):
+        from tools import ansi2svg
+        out = io.StringIO()
+        with patch.object(ansi2svg.sys, 'stdin', io.StringIO('m\n0\n')), patch.object(ansi2svg.sys, 'stdout', out):
+            ansi2svg.main()
+        self.assertEqual(out.getvalue().count('<text '), 2)
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

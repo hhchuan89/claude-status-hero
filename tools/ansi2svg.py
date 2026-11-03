@@ -93,7 +93,7 @@ def esc(s):
 def main():
     text = sys.stdin.read()
     lines = text.split("\n")
-    while lines and not lines[-1].strip("\x1b[0m \t"):
+    while lines and not ANSI.sub("", lines[-1]).strip():
         lines.pop()
 
     rects, texts = [], []
