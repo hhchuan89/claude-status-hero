@@ -374,8 +374,11 @@ def fmt_dur(sec):
 
 
 def fmt_clock(epoch, with_day=False):
-    lt = time.localtime(epoch)
-    return time.strftime("%a %H:%M" if with_day else "%H:%M", lt).upper()
+    try:
+        lt = time.localtime(epoch)
+        return time.strftime("%a %H:%M" if with_day else "%H:%M", lt).upper()
+    except (ValueError, OverflowError, OSError):
+        return "--:--"
 
 
 # ------------------------------------------------------------- framebuffer
@@ -586,8 +589,13 @@ def room_sign(fb, x, y, name, anchor="mt"):
 
 # --------------------------------------------------------------- HUD parts
 def draw_gauge(fb, x, y, label, pct, reset_epoch, window_sec, now, with_day):
-    pct = 0.0 if pct is None else pct
-    reset_epoch = (now + window_sec) if reset_epoch is None else reset_epoch
+    pct, reset_epoch = _hb.num(pct), _hb.num(reset_epoch)
+    if pct is None or reset_epoch is None:
+        text = "%s --%%" % label if pct is None else "%s %3.0f%%" % (label, pct)
+        r1 = text_plate(fb, x, y, text, ink=PALETTE_IDX["ink_dim"], pad=(4, 2))
+        r2 = text_plate(fb, x, r1[3] + 16, "RESET --", ink=PALETTE_IDX["ink_dim"], pad=(4, 1))
+        return (x, y, max(r1[2], x + 120, r2[2]), r2[3])
+    pct = max(0.0, min(100.0, pct))
     eta, remaining, level = gauge_calc(pct, reset_epoch, window_sec, now)
     col = (PALETTE_IDX["ink"] if level == 0
            else (PALETTE_IDX["warn"] if level == 1 else PALETTE_IDX["alarm"]))

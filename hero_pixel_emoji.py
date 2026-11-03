@@ -419,15 +419,23 @@ def fmt_dur(sec):
 
 
 def fmt_clock(epoch, with_day=False):
-    lt = time.localtime(epoch)
-    return time.strftime("%a %H:%M" if with_day else "%H:%M", lt).upper()
+    try:
+        lt = time.localtime(epoch)
+        return time.strftime("%a %H:%M" if with_day else "%H:%M", lt).upper()
+    except (ValueError, OverflowError, OSError):
+        return "--:--"
 
 
 def draw_gauge(img, d, x, y, label, pct, reset_epoch, window_sec, now, with_day):
     # None-safe (ported from hero_pixel.draw_gauge): a fresh install with no
     # rate-limit data yet must not crash the HUD.
-    pct = 0.0 if pct is None else pct
-    reset_epoch = (now + window_sec) if reset_epoch is None else reset_epoch
+    pct, reset_epoch = _hb.num(pct), _hb.num(reset_epoch)
+    if pct is None or reset_epoch is None:
+        text = "%s --%%" % label if pct is None else "%s %3.0f%%" % (label, pct)
+        r1 = text_plate(img, d, x, y, text, font=F_mono(16), ink=PAL["ink_dim"], pad=(0, 2))
+        r2 = text_plate(img, d, x, r1[3] + 16, "RESET --", font=F_mono(16), ink=PAL["ink_dim"], pad=(0, 1))
+        return (x, y, max(r1[2], x + 120, r2[2]), r2[3])
+    pct = max(0.0, min(100.0, pct))
     eta, remaining, level = gauge_calc(pct, reset_epoch, window_sec, now)
     col = PAL["ink"] if level == 0 else (PAL["warn"] if level == 1 else PAL["alarm"])
     l1 = "%s %3.0f%%" % (label, pct)

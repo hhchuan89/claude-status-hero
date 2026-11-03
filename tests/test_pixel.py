@@ -31,6 +31,7 @@ import sys
 import tempfile
 import time
 import zlib
+from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -365,6 +366,28 @@ fb_big = hp._upscale(hp.draw_office(hp.build_office_model(hp.demo_fleet(time.tim
                                                           time.time()), time.time()), 2)
 check("upscaled framebuffer still encodes to valid sixel",
       hp.encode_sixel(fb_big).startswith(b"\x1bP"))
+
+# Audit: expired windows cannot pin usage high after an account reset.
+now = time.time()
+rl = hp._hb.account_rl([
+    {'five': 99, 'five_reset': now - 1},
+    {'five': 3, 'five_reset': now + 18000}])
+check("rate limit discards expired window", rl is not None and rl['five'] == 3, rl)
+labels = []
+original_plate = hp.text_plate
+def record_plate(fb, x, y, text, **kwargs):
+    labels.append(text)
+    return original_plate(fb, x, y, text, **kwargs)
+with patch.object(hp, 'text_plate', record_plate):
+    hp.draw_gauge(hp.Framebuffer(hp.W, hp.H), 0, 0, 'WK', None, None, 604800, now, True)
+check("missing gauge stays unknown", any('--%' in s for s in labels)
+      and not any('SAFE' in s for s in labels), labels)
+try:
+    hp.fmt_clock(1e308)
+    hp.draw_gauge(hp.Framebuffer(hp.W, hp.H), 0, 0, '5H', -5, 1e308, 18000, now, False)
+    check("extreme gauge values do not crash", True)
+except Exception as e:
+    check("extreme gauge values do not crash", False, str(e))
 
 # ------------------------------------------------------------------ result
 

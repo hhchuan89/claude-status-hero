@@ -729,7 +729,7 @@ check("board singleton guard (pidfile) works",
 # value, stable) so the header meter can't jump between windows' snapshots.
 print("== rate-limit de-flicker ==")
 rl_code = """
-import os, sys, importlib.util
+import os, sys, importlib.util, time
 spec = importlib.util.spec_from_file_location('hb', os.path.join(%r, 'hero_board.py'))
 hb = importlib.util.module_from_spec(spec); spec.loader.exec_module(hb)
 S = [
@@ -737,10 +737,14 @@ S = [
   {'sid':'b','five':48.0,'five_reset':101,'seven':38.0,'seven_reset':201,'ts':500},
   {'sid':'c','five':46.0,'five_reset':102,'seven':37.0,'seven_reset':202,'ts':400},
 ]
+for s in S:
+    for k in ("five_reset", "seven_reset"):
+        s[k] += time.time() + 1000
+reset = S[1]["five_reset"]
 rl = hb.account_rl(S)
 assert rl['five'] == 48.0, rl          # the max, NOT the newest-ts 15.0
 assert rl['seven'] == 38.0, rl
-assert rl['five_reset'] == 101, rl     # reset paired with the max-five session
+assert rl['five_reset'] == reset, rl     # reset paired with the max-five session
 assert hb.account_rl([]) is None
 assert hb.account_rl([{'sid':'x'}]) is None
 print('rl-ok')

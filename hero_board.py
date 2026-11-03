@@ -549,14 +549,15 @@ def account_rl(sessions):
     without refreshing its rate-limit numbers). Picking "the newest-written
     session's snapshot" therefore makes the meter jump between windows — one
     may hold a stale 15% while another holds the current 48%. Within a window
-    the true value only climbs, so the MAX across sessions is the current value
+    the true value only climbs, so the MAX across unexpired snapshots is the current value
     and it's stable. Each metric's reset is paired with the session that
     supplied that metric's max. Returns a dict with five/five_reset/seven/
     seven_reset (values may be None) or None if no session has any yet."""
     out = {"five": None, "five_reset": None, "seven": None, "seven_reset": None}
     got = False
     for key, rkey in (("five", "five_reset"), ("seven", "seven_reset")):
-        cand = [s for s in sessions if num(s.get(key)) is not None]
+        cand = [s for s in sessions if num(s.get(key)) is not None
+                and (num(s.get(rkey)) is None or num(s.get(rkey)) > time.time())]
         if cand:
             top = max(cand, key=lambda s: num(s.get(key)))
             out[key] = num(top.get(key))
