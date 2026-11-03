@@ -263,7 +263,8 @@ def pct_txt(pct):
 
 def _ensure_dirs():
     try:
-        os.makedirs(SESS_DIR, exist_ok=True)
+        os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+        os.makedirs(SESS_DIR, mode=0o700, exist_ok=True)
     except Exception:
         pass
 
@@ -424,10 +425,20 @@ def save_config(updates):
     atomic_write(os.path.join(STATE_DIR, "config.json"), cfg)
 
 
-def all_sessions():
+def prune_session(path, snapshot):
+    """Do not unlink a session a concurrent hook has just refreshed."""
+    with session_lock():
+        if load_json(path) == snapshot:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+
+
+def all_sessions(cleanup=True):
     out = []
     try:
-        names = sorted(os.listdir(SESS_DIR))[:64]  # sanity cap
+        names = sorted(n for n in os.listdir(SESS_DIR) if n.endswith(".json"))
     except Exception:
         return out
     now = time.time()
@@ -436,21 +447,23 @@ def all_sessions():
             continue
         path = os.path.join(SESS_DIR, n)
         s = load_json(path)
-        if not s or not s.get("sid"):
+        if not s or not isinstance(s.get("sid"), str) or not s.get("sid"):
             continue
-        if s.get("ended"):
-            if now - (num(s.get("ts")) or 0) > 600:
-                try:
-                    os.remove(path)   # stale tombstone: board isn't running
-                except Exception:
-                    pass
+        age = now - (num(s.get("ts")) or 0)
+        if s.get("ended") or age > 24 * 3600:
+            if cleanup and (age > 24 * 3600 or (s.get("ended") and age > 600)):
+                prune_session(path, s)
             continue
+        if not isinstance(s.get("state"), str):
+            s["state"] = None
+        if not isinstance(s.get("hero"), str):
+            s["hero"] = None
         out.append(s)
     return out
 
 
 def pick_hero(sid):
-    claimed = {s.get("hero") for s in all_sessions() if s.get("sid") != str(sid)}
+    claimed = {s.get("hero") for s in all_sessions(cleanup=False) if s.get("sid") != str(sid)}
     names = [n for n, _g, _c in HERO_ROSTER]
     idx = int(hashlib.sha1(str(sid).encode()).hexdigest(), 16) % len(names)
     for i in range(len(names)):

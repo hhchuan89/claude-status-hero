@@ -193,6 +193,35 @@ h.update_session('race', {'cost': 12})
                 self.assertEqual(len(rows), 3)
                 self.assertTrue(all(hl.disp_width(row) <= width for row in rows))
 
+    def test_fleet_scan_does_not_starve_live_sessions_or_trust_hostile_types(self):
+        Path(hl.SESS_DIR).mkdir(parents=True)
+        for i in range(70):
+            Path(hl.SESS_DIR, '%03d.json' % i).write_text(json.dumps({'sid': str(i), 'ts': 1, 'ended': True}))
+        Path(hl.SESS_DIR, 'z-live.json').write_text(json.dumps({'sid': 'live', 'ts': time.time(), 'hero': [], 'state': {}}))
+        sessions = hl.all_sessions()
+        self.assertEqual([s['sid'] for s in sessions], ['live'])
+        hl.fleet_summary(sessions * 2, 'live')
+        hl.pick_hero('new')
+        self.assertEqual(len(list(Path(hl.SESS_DIR).glob('*.json'))), 1)
+
+    def test_cleanup_cannot_delete_a_refreshed_session(self):
+        hl.update_session('race', {'state': 'idle'})
+        path = hl.sess_path('race')
+        old = hl.load_json(path)
+        hl.update_session('race', {'cost': 5})
+        hl.prune_session(path, old)
+        self.assertEqual(hl.load_json(path)['cost'], 5)
+
+    def test_registry_omission_cannot_delete_a_live_process(self):
+        hl.update_session('active', {'state': 'idle', 'ppid': os.getpid()})
+        path = hl.sess_path('active')
+        saved = hl.load_json(path)
+        saved['ts'] = time.time() - 100
+        hl.atomic_write(path, saved)
+        with patch.object(hb, 'live_sids', return_value={'another-window'}):
+            self.assertEqual([s['sid'] for s in hb.fleet()], ['active'])
+        self.assertTrue(Path(path).exists())
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

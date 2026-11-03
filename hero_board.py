@@ -462,6 +462,7 @@ def live_sids():
 
 def fleet(now=None):
     now = now or time.time()
+    from hero_line import prune_session
     out = []
     live = live_sids()
     try:
@@ -475,6 +476,7 @@ def fleet(now=None):
         s = load_json(path)
         if not s or not isinstance(s.get("sid"), str) or not s.get("sid"):
             continue
+        snapshot = dict(s)
         if not isinstance(s.get("state"), str):
             s["state"] = None       # hostile types would crash `in STATES`
         if not isinstance(s.get("hero"), str):
@@ -485,13 +487,14 @@ def fleet(now=None):
             # sight would re-open the resurrection race they exist to stop
             if now - (num(s.get("ts")) or 0) > 60:
                 try:
-                    os.remove(path)
+                    prune_session(path, snapshot)
                 except Exception:
                     pass
             continue
-        if now - (num(s.get("ts")) or 0) > 24 * 3600:
+        if (now - (num(s.get("ts")) or 0) > 24 * 3600
+                and s["sid"] not in live and pid_alive(s.get("ppid")) is not True):
             try:
-                os.remove(path)               # day-old corpse: bury it
+                prune_session(path, snapshot)
             except Exception:
                 pass
             continue
@@ -500,9 +503,10 @@ def fleet(now=None):
         # `if live` -> skip pruning if the registry was unreadable; the ts>90 s
         # guard avoids a startup race with a session younger than its registry
         # entry.
-        if live and s["sid"] not in live and now - (num(s.get("ts")) or 0) > 90:
+        if (live and s["sid"] not in live and now - (num(s.get("ts")) or 0) > 90
+                and pid_alive(s.get("ppid")) is False):
             try:
-                os.remove(path)
+                prune_session(path, snapshot)
             except Exception:
                 pass
             continue
