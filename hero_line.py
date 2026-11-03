@@ -31,6 +31,7 @@ STATUS_HERO_DIR (state dir override), NO_COLOR.
 Python ≥3.9, stdlib only. MIT.
 """
 
+from contextlib import contextmanager
 import hashlib
 import json
 import math
@@ -342,35 +343,71 @@ def atomic_write(path, data):
             pass
 
 
-def update_session(sid, updates):
+@contextmanager
+def file_lock(path, timeout=1.0):
+    """Bounded advisory lock, released by the OS even if a hook is killed.
+    Keep the lock inode: unlinking it could let two writers lock different files.
+    """
+    import stat
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    acquired = False
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("lock is not a regular file")
+        if os.name == "nt":
+            import msvcrt
+            if not os.fstat(fd).st_size:
+                os.write(fd, b"0")
+        else:
+            import fcntl
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if os.name == "nt":
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("status-hero lock timed out")
+                time.sleep(.005)
+        yield
+    finally:
+        if acquired:
+            if os.name == "nt":
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def session_lock():
+    _ensure_dirs()
+    return file_lock(os.path.join(STATE_DIR, "sessions.lock"))
+
+
+def update_session(sid, updates, resume=False):
     if not sid:
         return
-    _ensure_dirs()
-    path = sess_path(sid)
-    s = load_json(path) or {}
-    if s.get("ended") and "state" not in updates:
-        return          # tombstone: only a live hook may resurrect a session
-    if "state" in updates:
-        s.pop("ended", None)
-    s.update(updates)
-    s["sid"] = str(sid)[:80]
-    s["ts"] = time.time()
-    if "hero" not in s:
-        s["hero"] = pick_hero(sid)
-    if "started_at" not in s:
-        s["started_at"] = s["ts"]  # first sighting = stable lane order
-    if "state" not in updates:
-        # metrics-only write (statusline): a hook may have advanced the state
-        # between our load and now — re-check so we never roll it back.
-        fresh = load_json(path)
-        if fresh:
-            if fresh.get("ended"):
-                return
-            if (num(fresh.get("state_ts")) or 0) > (num(s.get("state_ts")) or 0):
-                for k in ("state", "state_ts", "need", "activity", "activity_ts"):
-                    if k in fresh:
-                        s[k] = fresh[k]
-    atomic_write(path, s)
+    with session_lock():
+        path = sess_path(sid)
+        s = load_json(path) or {}
+        if s.get("ended") and not resume:
+            return  # only SessionStart may resume; late hooks stay buried
+        if resume:
+            s.pop("ended", None)
+        s.update(updates)
+        s["sid"] = str(sid)[:80]
+        s["ts"] = time.time()
+        if "hero" not in s:
+            s["hero"] = pick_hero(sid)
+        if "started_at" not in s:
+            s["started_at"] = s["ts"]
+        atomic_write(path, s)
 
 
 def load_config():
@@ -838,8 +875,9 @@ def handle_hook(event):
         # tombstone, not delete: an in-flight statusline render (git can take
         # seconds) would otherwise resurrect the file after os.remove and the
         # board would show a zombie lane. The board buries tombstones on sight.
-        atomic_write(sess_path(sid), {"sid": str(sid)[:80], "ended": True,
-                                      "ts": now})
+        with session_lock():
+            atomic_write(sess_path(sid), {"sid": str(sid)[:80], "ended": True,
+                                         "ts": now})
         return
 
     upd = {}
@@ -873,7 +911,7 @@ def handle_hook(event):
         upd = {"state": "working", "state_ts": now}
     else:
         return
-    update_session(sid, upd)
+    update_session(sid, upd, resume=(event == "SessionStart"))
 
 
 # ------------------------------------------------------------ install logic

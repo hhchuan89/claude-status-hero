@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import subprocess
+import time
 import unittest
 from unittest.mock import patch
 
@@ -66,6 +68,47 @@ class AuditTests(unittest.TestCase):
         self.assertFalse(hl.owned_command('echo hero_line.py'))
         self.assertFalse(hl.owned_command('python3 /tmp/other-hero_line.py'))
         self.assertTrue(hl.owned_command(hl.shell_cmd(sys.executable, "/tmp/a 'quote'/hero_line.py")))
+
+    def test_concurrent_metrics_cannot_rollback_hook(self):
+        hl.update_session('race', {'state': 'working', 'state_ts': 1})
+        ready, release = self.root / 'ready', self.root / 'release'
+        env = dict(os.environ, STATUS_HERO_DIR=hl.STATE_DIR)
+        code = """import hero_line as h, pathlib, time
+original = h.atomic_write
+def paused(path, data):
+    pathlib.Path(%r).touch()
+    deadline = time.monotonic() + 10
+    while not pathlib.Path(%r).exists() and time.monotonic() < deadline:
+        time.sleep(.005)
+    original(path, data)
+h.atomic_write = paused
+h.update_session('race', {'cost': 12})
+""" % (str(ready), str(release))
+        metrics = subprocess.Popen([sys.executable, '-c', code], env=env, cwd=str(ROOT))
+        self.addCleanup(lambda: metrics.poll() is None and metrics.kill())
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(.005)
+        self.assertTrue(ready.exists())
+        hook = subprocess.Popen([sys.executable, '-c', "import hero_line as h; h.update_session('race', {'state':'needs_you','state_ts':2})"], env=env, cwd=str(ROOT))
+        self.addCleanup(lambda: hook.poll() is None and hook.kill())
+        time.sleep(.15)
+        release.touch()
+        self.assertEqual(metrics.wait(timeout=5), 0)
+        self.assertEqual(hook.wait(timeout=5), 0)
+        saved = hl.load_json(hl.sess_path('race'))
+        self.assertEqual(saved['state'], 'needs_you')
+        self.assertEqual(saved['cost'], 12)
+
+    def test_only_session_start_can_resume_tombstone(self):
+        with patch.object(hl.sys, 'stdin', io.StringIO('{"session_id":"end"}')):
+            hl.handle_hook('SessionEnd')
+        self.assertTrue(hl.load_json(hl.sess_path('end'))['ended'])
+        hl.update_session('end', {'state': 'working', 'state_ts': time.time()})
+        self.assertTrue(hl.load_json(hl.sess_path('end'))['ended'])
+        with patch.object(hl.sys, 'stdin', io.StringIO('{"session_id":"end"}')):
+            hl.handle_hook('SessionStart')
+        self.assertFalse(hl.load_json(hl.sess_path('end')).get('ended'))
 
 
 def run_checks(check):

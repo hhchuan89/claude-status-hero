@@ -118,29 +118,17 @@ bumped to the next free slot. Lanes ordered by `started_at` — no reshuffling.
 
 ### Concurrency (the session file is shared by 2+ processes)
 
-A hook process and a statusline render can update the SAME session file
-simultaneously — both are load → merge → `os.replace`. Two guards keep the
-state machine honest:
+Hooks and statusline renders serialize load → merge → replace under a bounded
+OS advisory lock (`sessions.lock`, private permissions). Atomic replacement
+keeps readers from seeing partial JSON; the lock prevents lost updates between
+writers. The OS releases the lock if a writer is killed. A lock timeout drops
+the update rather than blocking Claude Code indefinitely.
 
-- **No state rollback.** A metrics-only write (statusline) re-loads the file
-  just before replacing it; if the on-disk `state_ts` advanced meanwhile (a
-  hook fired), the fresher `state/activity` keys are re-merged. Without this,
-  a ~ms race could roll `needs_you` back to `working` — and stick, because a
-  blocked Claude fires no further hooks to correct it.
-- **No resurrection.** `SessionEnd` writes a tombstone `{"ended": true}`
-  instead of deleting: a statusline render already in flight (git subprocess
-  can take seconds) would otherwise recreate the file and leave a zombie lane
-  on the board for hours. Metrics writes refuse to touch a tombstone; a real
-  hook (resumed session, same session_id) clears it. The board hides
-  tombstones immediately but only DELETES them after 60 s — deleting on
-  sight would remove the guard while the in-flight render is still coming
-  (`load_json or {}` on a missing file skips the ended check), re-opening
-  the exact race the tombstone exists to stop. `all_sessions()` sweeps
-  stragglers after 10 min for statusline-only setups.
+`SessionEnd` writes a tombstone. Metrics and late tool/stop hooks cannot clear
+it; only `SessionStart` may resume the same session ID. The board hides fresh
+tombstones immediately and removes old ones after a grace period.
 
-Known cosmetic race, accepted: two sessions starting in the same instant can
-claim the same hero (`pick_hero` scan-then-write has no mutex, ~1/8 chance on
-a hash collision). Harmless; a mutex isn't worth the complexity.
+The eight-animal roster necessarily repeats when more than eight windows are live.
 
 ## Office mode (`--office`)
 
