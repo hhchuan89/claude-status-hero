@@ -222,6 +222,21 @@ h.update_session('race', {'cost': 12})
             self.assertEqual([s['sid'] for s in hb.fleet()], ['active'])
         self.assertTrue(Path(path).exists())
 
+    def test_pending_launch_prevents_a_startup_window_storm(self):
+        with patch.object(hb, '_board_already_open', return_value=False), patch.object(hb.sys, 'platform', 'darwin'), patch.object(hb, '_mac_launch_board', return_value=0) as launch:
+            self.assertEqual(hb.ensure_board(['--ensure', '--office']), 0)
+            self.assertEqual(hb.ensure_board(['--ensure', '--office']), 0)
+        self.assertEqual(launch.call_count, 1)
+
+    def test_pidfile_does_not_follow_a_symlink(self):
+        Path(hb.STATE_DIR).mkdir(parents=True)
+        victim = self.root / 'victim'
+        victim.write_text('untouched')
+        Path(hb._pidfile()).symlink_to(victim)
+        hb._write_pidfile()
+        self.assertEqual(victim.read_text(), 'untouched')
+        self.assertEqual(Path(hb._pidfile()).read_text(), str(os.getpid()))
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

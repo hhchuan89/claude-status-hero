@@ -1096,17 +1096,27 @@ def _pid_alive(pid):
 def _write_pidfile():
     """The running board records its PID so a later session's --ensure sees it
     (the singleton signal). Best-effort — never fail the board over it."""
+    tmp = None
     try:
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(_pidfile(), "w") as f:
+        from hero_line import _open_excl, _tmp_name
+        os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+        tmp = _tmp_name(_pidfile())
+        with _open_excl(tmp) as f:
             f.write(str(os.getpid()))
+        os.replace(tmp, _pidfile())
     except Exception:
-        pass
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def _clear_pidfile():
     try:
-        if int(open(_pidfile()).read().strip()) == os.getpid():
+        with open(_pidfile()) as f:
+            mine = int(f.read().strip()) == os.getpid()
+        if mine:
             os.remove(_pidfile())
     except Exception:
         pass
@@ -1155,17 +1165,28 @@ def _board_already_open():
 def ensure_board(argv):
     """Open the board in a new terminal window if one isn't already up. A safe
     no-op on any failure — it must never block or fail the SessionStart hook."""
-    if _board_already_open():
-        return 0
-    board = os.path.abspath(__file__)
-    py = sys.executable or "python3"
-    extra = [a for a in argv if a != "--ensure"]     # mode flags, e.g. --office
-    if sys.platform == "darwin":
-        return _mac_launch_board(py, board, extra)
-    if os.name == "nt":
-        return _win_launch_board(py, board, extra)
-    cmd = " ".join(_shq(a) for a in [py, board] + extra)
-    sys.stderr.write("auto-launch: unsupported platform — run: %s\n" % cmd)
+    from hero_line import file_lock, load_json, atomic_write
+    try:
+        os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+        with file_lock(os.path.join(STATE_DIR, "board-launch.lock")):
+            pending = os.path.join(STATE_DIR, "board-launch.json")
+            age = time.time() - (num((load_json(pending) or {}).get("ts")) or 0)
+            if 0 <= age < 15 or _board_already_open():
+                return 0
+            # Popen returns before the new window writes board.pid. Reserve
+            # that startup gap; failures may retry once this short lease expires.
+            atomic_write(pending, {"ts": time.time()})
+            board = os.path.abspath(__file__)
+            py = sys.executable or "python3"
+            extra = [a for a in argv if a != "--ensure"]
+            if sys.platform == "darwin":
+                return _mac_launch_board(py, board, extra)
+            if os.name == "nt":
+                return _win_launch_board(py, board, extra)
+            cmd = " ".join(_shq(a) for a in [py, board] + extra)
+            sys.stderr.write("auto-launch: unsupported platform — run: %s\n" % cmd)
+    except Exception:
+        pass  # hooks must not block Claude Code when a lock/launch fails
     return 0
 
 
