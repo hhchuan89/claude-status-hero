@@ -932,22 +932,10 @@ MARK = "hero_line.py"  # our entries are recognized by this substring
 
 
 def shell_cmd(*parts):
-    """Join command parts with real shell quoting (spaces AND metacharacters)."""
-    out = []
-    for p in parts:
-        if os.name == "nt":
-            # Claude Code runs statusLine/hook commands through a POSIX shell
-            # even on Windows, where an unquoted backslash is an escape char
-            # ("C:\\Python\\python.exe" -> "C:Pythonpython.exe": not found).
-            # Forward slashes work as path separators in that shell and cmd.exe.
-            p = p.replace("\\", "/")
-            if not re.fullmatch(r"[A-Za-z0-9_\-.:/]+", p):
-                p = '"%s"' % p.replace('"', '""')
-        else:
-            import shlex
-            p = shlex.quote(p)
-        out.append(p)
-    return " ".join(out)
+    """Commands run in a POSIX shell on every platform, including Windows."""
+    import shlex
+    return " ".join(shlex.quote(p.replace("\\", "/") if os.name == "nt" else p)
+                    for p in parts)
 
 
 def settings_file(argv):

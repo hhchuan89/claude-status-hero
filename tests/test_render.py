@@ -316,8 +316,7 @@ p = subprocess.run([PY, "-c", (
     timeout=15)
 # the dangerous path must be quoted so the shell can't execute the $(...) —
 # POSIX shlex uses single quotes, the Windows branch uses double quotes.
-_meta_expect = ('"/tmp/a$(rm -rf x)/b.py"' if os.name == "nt"
-                else "'/tmp/a$(rm -rf x)/b.py'")
+_meta_expect = "'/tmp/a$(rm -rf x)/b.py'"
 check("shell_cmd quotes metachars", _meta_expect in p.stdout, p.stdout.strip())
 
 # ------------------------------------------------------- 5: board geometry
@@ -685,7 +684,6 @@ check("autostart preserves foreign SessionStart hook",
       any("keep-me" in json.dumps(g) for g in ss_al))
 if os.name == "nt":
     check("autostart hook uses forward-slash path (Windows)", "\\" not in cmd_al, cmd_al)
-    check("autostart hook has no POSIX single-quotes (Windows)", "'" not in cmd_al, cmd_al)
 p = _autostart("status")
 check("autostart status ON after enable", "on" in p.stdout.lower(), p.stdout.strip())
 _autostart("on")   # idempotent: enabling twice keeps exactly one entry

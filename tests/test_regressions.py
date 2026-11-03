@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import subprocess
+import shlex
 import time
 import unittest
 from unittest.mock import patch
@@ -139,6 +140,21 @@ h.update_session('race', {'cost': 12})
             hl.uninstall(['--settings', str(self.settings)])
             hb.autostart('on')
         self.assertEqual(calls, [str(self.settings)] * 3)
+
+    def test_windows_hook_quoting_roundtrips_shell_metacharacters(self):
+        arg = 'C:\\a$(printf injected) & `printf injected`\\hero_line.py'
+        for module in (hl, hb):
+            with patch.object(module.os, 'name', 'nt'):
+                cmd = module.shell_cmd('python3', arg, '--hook', 'Stop')
+            self.assertEqual(shlex.split(cmd)[1], arg.replace('\\', '/'))
+            self.assertIn("'", cmd)
+
+    def test_windows_launch_fallback_does_not_use_cmd_shell(self):
+        with patch.object(hb.shutil, 'which', return_value=None), patch.object(hb.subprocess, 'Popen') as launch:
+            hb._win_launch_board('python.exe', 'C:/a&b/hero_board.py', ['--office'])
+        args, kwargs = launch.call_args
+        self.assertEqual(args[0], ['python.exe', 'C:/a&b/hero_board.py', '--office'])
+        self.assertEqual(kwargs['creationflags'], 0x10)
 
 
 def run_checks(check):

@@ -1042,25 +1042,10 @@ def _shq(s):
 
 
 def shell_cmd(*parts):
-    """Join command parts into a string Claude Code can run as a hook command,
-    quoting per-OS. Mirrors hero_line.py's shell_cmd so the --ensure hook is
-    built exactly the way the (working) statusline hooks are.
-
-    Claude Code runs hook commands through a POSIX shell even on Windows, where
-    an unquoted backslash is an escape ("C:\\Py\\python.exe" -> "C:Pypython.exe":
-    not found). Forward slashes work as path separators in that shell and in
-    cmd.exe, so on Windows we normalise separators and only quote when a part
-    holds something outside the safe set."""
-    out = []
-    for p in parts:
-        if os.name == "nt":
-            p = p.replace("\\", "/")
-            if not re.fullmatch(r"[A-Za-z0-9_\-.:/]+", p):
-                p = '"%s"' % p.replace('"', '""')
-        else:
-            p = _shq(p)
-        out.append(p)
-    return " ".join(out)
+    """Commands run in a POSIX shell on every platform, including Windows."""
+    import shlex
+    return " ".join(shlex.quote(p.replace("\\", "/") if os.name == "nt" else p)
+                    for p in parts)
 
 
 def _settings_path():
@@ -1225,7 +1210,7 @@ def _mac_launch_board(py, board, extra):
 
 def _win_launch_board(py, board, extra):
     """Windows: open the board in a fresh Windows Terminal window (falling back
-    to a plain console via `start`). The command is passed as a real argv list
+    to a new console via CREATE_NEW_CONSOLE). The command is passed as a real argv list
     so the subprocess layer quotes it — no shell-escaping games. Best-effort:
     never raises, so it can't break the SessionStart hook. Sizing is left to the
     terminal; the TUI office adapts to whatever window size it gets."""
@@ -1237,13 +1222,13 @@ def _win_launch_board(py, board, extra):
         # --title labels it. The board runs directly, so the window closes when
         # you quit with `q`.
         attempts.append([wt, "-w", "_new", "--title", "claude-status-hero"] + child)
-    # `cmd /c start "" ...` opens a new console window — universal fallback for
-    # machines without Windows Terminal. "" is the (empty) window title.
-    attempts.append(["cmd", "/c", "start", "", py, board] + list(extra))
+    # Launch directly: cmd.exe would interpret shell metacharacters in paths.
+    attempts.append(child)
     for launch in attempts:
         try:
             subprocess.Popen(launch, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10))
             return 0
         except Exception:
             continue
