@@ -65,6 +65,7 @@ ctx ████████░░░░ 64% 128/200k · 7d █████░�
 python3 hero_line.py --style list     # 7 lines: gauge + one row per session
 python3 hero_line.py --style fleet    # 10 lines: gauge + a static pixel fleet
 python3 hero_line.py --style gauge    # back to the 3-line default
+python3 hero_line.py --style solo     # 3 lines, this window only: no session-file I/O per refresh
 ```
 
 `list` is the sweet spot for many windows: the 3 gauge lines plus up to four

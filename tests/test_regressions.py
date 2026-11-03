@@ -319,6 +319,18 @@ h.update_session('race', {'cost': 12})
             self.assertEqual({s['sid'] for s in hb.fleet()}, {'newborn', 'listed'})
         self.assertFalse(Path(hl.sess_path('closed')).exists())
 
+    def test_solo_style_renders_three_lines_without_session_file_io(self):
+        # solo exists so many concurrent windows don't each lock, write and
+        # re-read the shared sessions dir on every refresh.
+        hl.save_config({'style': 'solo'})
+        with patch.object(hl, 'all_sessions', side_effect=AssertionError('fleet read')), \
+                patch.object(hl, 'update_session', side_effect=AssertionError('session write')):
+            rows = hl.render({'session_id': 'solo-window', 'model': {'display_name': 'Opus'}}, 80).split('\n')
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([hl.disp_width(row) for row in rows], [hl.render_width(80)] * 3)
+        self.assertFalse(Path(hl.sess_path('solo-window')).exists())
+        self.assertEqual(hl.main(['--style', 'solo', '--settings', str(self.settings)]), 0)
+
     def test_redaction_is_linear_on_a_large_pasted_blob(self):
         # A minified JSON paste with one bare-host URL made the userinfo
         # pattern backtrack quadratically (158 KB took ~8 s in the prompt hook).

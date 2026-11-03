@@ -526,8 +526,9 @@ def all_sessions(cleanup=True):
     return out
 
 
-def pick_hero(sid):
-    claimed = {s.get("hero") for s in all_sessions(cleanup=False) if s.get("sid") != str(sid)}
+def pick_hero(sid, scan=True):
+    claimed = ({s.get("hero") for s in all_sessions(cleanup=False) if s.get("sid") != str(sid)}
+               if scan else set())
     names = [n for n, _g, _c in HERO_ROSTER]
     idx = int(hashlib.sha1(str(sid).encode()).hexdigest(), 16) % len(names)
     for i in range(len(names)):
@@ -634,8 +635,13 @@ def render(data, width=None):
     branch = sanitize(git_branch(get(data, "workspace", "current_dir")
                                  or get(data, "cwd")), 40)
 
+    # solo: this window only. No session-file write (no lock) and no fleet
+    # read per refresh, for machines running many windows at once.
+    style = load_config().get("style")
+    solo = style == "solo"
+
     # persist metrics FIRST so our own lane is in the fleet we render
-    if sid:
+    if sid and not solo:
         update_session(sid, {
             "dir": dirname, "cwd": sanitize(get(data, "workspace", "current_dir") or "", 200),
             "model": model, "ctx": ctx,
@@ -646,9 +652,9 @@ def render(data, width=None):
             "seven": seven, "seven_reset": num(seven_rs),
             "branch": branch, "ppid": os.getppid(),
         })
-    sessions = all_sessions()
+    sessions = [] if solo else all_sessions()
     me = next((s for s in sessions if s.get("sid") == str(sid)), None)
-    hero = (me or {}).get("hero") or (pick_hero(sid) if sid else "fox")
+    hero = (me or {}).get("hero") or (pick_hero(sid, scan=not solo) if sid else "fox")
 
     # ---- L1: identity ----
     left = BOLD + dirname + RESET
@@ -678,7 +684,6 @@ def render(data, width=None):
     line2 = crop_pad(label + track(five, track_w, hero) + tail, W)
 
     # ---- fleet style: full static fleet scene instead of L3 ----
-    style = load_config().get("style")
     if style == "fleet":
         return "\n".join([line1, line2] + fleet_lines(sessions, sid, W))
 
@@ -1335,8 +1340,8 @@ def main(argv):
     if "--style" in argv:
         i = argv.index("--style")
         val = argv[i + 1] if i + 1 < len(argv) else ""
-        if val not in ("fleet", "gauge", "list"):
-            print("usage: --style gauge|list|fleet")
+        if val not in ("fleet", "gauge", "list", "solo"):
+            print("usage: --style gauge|solo|list|fleet")
             return 1
         path = settings_file(argv)
         with settings_lock(path):
@@ -1353,6 +1358,7 @@ def main(argv):
                       % ("→ 2s" if val in ("fleet", "list") else "removed", path))
             save_config({"style": val})
         desc = {"gauge": "3 lines: HUD + 5h track + meters",
+                "solo": "3 lines: gauge without reading or writing session files",
                 "list": "7 lines: gauge + one compact row per session",
                 "fleet": "10 lines: HUD + 5h track + static fleet scene"}
         print("style → %s  (%s)" % (val, desc[val]))
