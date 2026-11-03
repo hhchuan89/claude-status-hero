@@ -165,6 +165,7 @@ def disp_width(s):
 
 def crop_pad(s, width):
     """Crop s to exactly `width` display columns (ANSI-aware), pad w/ spaces."""
+    width = max(0, width)
     out, w = [], 0
     for part in ANSI_TOKEN.split(s):
         if not part:
@@ -191,9 +192,11 @@ def sanitize(s, limit=120):
     Strips ANSI, C0/C1 controls, and invisible format chars (bidi overrides)."""
     if not isinstance(s, str):
         return ""
-    s = s[:4096]        # bound the scans: session files can be hostile/huge
-    s = CTRL_STRIP.sub("", ANSI_TOKEN.sub("", s))
-    s = "".join(ch for ch in s if unicodedata.category(ch) != "Cf").strip()
+    s = ANSI_TOKEN.sub("", s[:4096])
+    s = "".join(ch for ch in s if unicodedata.category(ch)
+                not in ("Cc", "Cf", "Cs", "Zl", "Zp")).strip()
+    if ASCII:
+        s = s.encode("ascii", "replace").decode("ascii")
     if len(s) > limit:
         s = s[: limit - 2] + ".."
     return s
@@ -215,7 +218,7 @@ def get(d, *path):
 def num(v):
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     # json admits bare NaN/Infinity; int()/round() on them crashes renders
     return f if math.isfinite(f) else None
@@ -246,7 +249,7 @@ def fmt_dur(ms):
 
 def bar(pct, width):
     p = num(pct)
-    filled = 0 if p is None else max(0, min(width, int(round(p * width / 100.0))))
+    filled = 0 if p is None else max(0, min(width, int(round(max(0.0, min(100.0, p)) * width / 100.0))))
     col = zone(p)
     return col + G_FILL * filled + GRAY + DIM + G_EMPTY * (width - filled) + RESET
 
@@ -471,7 +474,7 @@ def effective_state(s, now=None):
 
 def git_branch(cwd):
     """Branch + dirty count, cached 5 s per repo (statusline runs often)."""
-    if not cwd or not os.path.isdir(cwd):
+    if not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
         return ""
     _ensure_dirs()
     key = hashlib.sha1(cwd.encode()).hexdigest()[:16]
@@ -527,8 +530,10 @@ def render(data, width=None):
     EXACTLY W columns wide."""
     W = max(40, min((width or term_width()) - 2, 100))
 
-    dirname = sanitize(os.path.basename(
-        get(data, "workspace", "current_dir") or get(data, "cwd") or "") or "?", 24)
+    cwd = get(data, "workspace", "current_dir") or get(data, "cwd") or ""
+    if not isinstance(cwd, str):
+        cwd = ""
+    dirname = sanitize(os.path.basename(cwd) or "?", 24)
     model = sanitize(get(data, "model", "display_name") or "", 20)
     agent = sanitize(get(data, "agent", "name") or "", 16)
     effort = sanitize(get(data, "effort", "level") or "", 8)
@@ -866,6 +871,8 @@ def handle_hook(event):
         # so the STATE flip still lands; only the activity detail is lost.
         m = re.search(r'"session_id"\s*:\s*"([A-Za-z0-9_-]{1,80})"', raw[:4096])
         payload = {"session_id": m.group(1)} if m else {}
+    if not isinstance(payload, dict):
+        return
     sid = payload.get("session_id")
     if not sid:
         return
@@ -882,9 +889,11 @@ def handle_hook(event):
 
     upd = {}
     if event == "SessionStart":
+        cwd = payload.get("cwd")
+        cwd = cwd if isinstance(cwd, str) else ""
         upd = {"state": "working", "state_ts": now, "started_at": now,
                "cwd": sanitize(payload.get("cwd") or "", 200),
-               "dir": sanitize(os.path.basename(payload.get("cwd") or "") or "?", 24)}
+               "dir": sanitize(os.path.basename(cwd) or "?", 24)}
     elif event == "UserPromptSubmit":
         snippet = sanitize(payload.get("prompt") or "", 60)
         upd = {"state": "working", "state_ts": now,
@@ -1243,8 +1252,9 @@ def main(argv):
             n = {"fleet": 10, "list": 7}.get(load_config().get("style"), 3)
         except Exception:
             n = 3
-        sys.stdout.write("status-hero\n(render error — run --doctor)\n"
-                         + " \n" * (n - 2))
+        W = max(40, min(term_width() - 2, 100))
+        rows = ["status-hero", "(render error — run --doctor)"] + [""] * (n - 2)
+        sys.stdout.write("\n".join(crop_pad(row, W) for row in rows) + "\n")
     return 0
 
 

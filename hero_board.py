@@ -124,6 +124,7 @@ def disp_width(s):
 
 
 def crop_pad(s, width, fill=" "):
+    width = max(0, width)
     out, w = [], 0
     for part in ANSI_TOKEN.split(s):
         if not part:
@@ -166,8 +167,11 @@ def wcrop(s, w):
 def sanitize(s, limit=120):
     if not isinstance(s, str):
         return ""
-    s = s[:4096]        # bound the regex scans: hostile files can be huge
-    s = CTRL_STRIP.sub("", ANSI_TOKEN.sub("", s)).strip()
+    s = ANSI_TOKEN.sub("", s[:4096])
+    s = "".join(ch for ch in s if unicodedata.category(ch)
+                not in ("Cc", "Cf", "Cs", "Zl", "Zp")).strip()
+    if ASCII:
+        s = s.encode("ascii", "replace").decode("ascii")
     if len(s) > limit:
         s = s[: limit - 2] + ".."
     return s
@@ -176,7 +180,7 @@ def sanitize(s, limit=120):
 def num(v):
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     # json.load admits bare NaN/Infinity; int(round(nan)) would then crash
     # every render mode, and the poisoned file crash-loops the board
@@ -198,7 +202,7 @@ def fmt_reset(epoch_s):
 
 def bar(pct, width):
     p = num(pct)
-    filled = 0 if p is None else max(0, min(width, int(round(p * width / 100.0))))
+    filled = 0 if p is None else max(0, min(width, int(round(max(0.0, min(100.0, p)) * width / 100.0))))
     fill_ch, empty_ch = ("#", ".") if ASCII else ("█", "░")
     return zone(p) + fill_ch * filled + GRAY + DIM + empty_ch * (width - filled) + RESET
 

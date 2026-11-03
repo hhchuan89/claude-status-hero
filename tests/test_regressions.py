@@ -164,6 +164,28 @@ h.update_session('race', {'cost': 12})
         self.assertEqual(hl.main(['--style', 'gauge', '--settings', str(self.settings)]), 0)
         self.assertEqual(len(list(self.root.glob('settings.json.status-hero-backup-*'))), before + 1)
 
+    def test_external_text_cannot_leak_c1_bidi_or_surrogates(self):
+        for module in (hl, hb):
+            self.assertEqual(module.sanitize('a\x9bb\u202ec\ud800d'), 'abcd')
+            with patch.object(module, 'ASCII', True):
+                self.assertTrue(module.sanitize('项目🦊').isascii())
+
+    def test_wrong_cwd_types_and_large_numbers_do_not_break_render(self):
+        with patch.object(hl, 'read_fable', return_value=None):
+            for cwd in (None, 42, [], {'x': 1}):
+                rows = hl.render({'workspace': {'current_dir': cwd}}, 80).split('\n')
+                self.assertEqual([hl.disp_width(row) for row in rows], [78] * 3)
+        for module in (hl, hb):
+            self.assertIsNone(module.num(10 ** 1000))
+            self.assertEqual(module.disp_width(module.bar(1e308, 12)), 12)
+
+    def test_render_error_fallback_keeps_width_and_height(self):
+        for style, height in (('gauge', 3), ('list', 7), ('fleet', 10)):
+            out = io.StringIO()
+            with patch.object(hl, 'render', side_effect=ValueError), patch.object(hl, 'load_config', return_value={'style': style}), patch.object(hl, 'term_width', return_value=60), patch.object(hl.sys, 'stdin', io.StringIO('{}')), patch.object(hl.sys, 'stdout', out):
+                self.assertEqual(hl.main([]), 0)
+            self.assertEqual([hl.disp_width(row) for row in out.getvalue().splitlines()], [58] * height)
+
 
 def run_checks(check):
     class Results(unittest.TestResult):
