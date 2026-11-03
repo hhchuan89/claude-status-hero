@@ -292,6 +292,14 @@ h.update_session('race', {'cost': 12})
             with self.assertRaises(PermissionError):
                 hl.save_config({'style': 'list'})
 
+    def test_installer_does_not_print_previous_command_contents(self):
+        self.settings.write_text(json.dumps({'statusLine': {'type': 'command', 'command': 'other-tool --token synthetic-private-marker'}}))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            hl.install(['--settings', str(self.settings)])
+        self.assertNotIn('synthetic-private-marker', out.getvalue())
+        self.assertIn('replaced', out.getvalue())
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

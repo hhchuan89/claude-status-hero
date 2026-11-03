@@ -1059,7 +1059,7 @@ def install(argv):
     print("  hooks      : %d entries across %d events (state for hero_board.py)"
           % (len(HOOK_EVENTS), len(events)))
     if prev and not (isinstance(prev, dict) and owned_command(prev.get("command"))):
-        print("  replaced   : %s" % json.dumps(prev))
+        print("  replaced   : previous statusline (saved in backup)")
     print("  rollback   : %s" % (shell_cmd("cp", backup, path) if backup else "remove the newly created settings file"))
     print("takes effect on the next statusline refresh; open a new Claude Code"
           " window (or send a message) to see it.")
