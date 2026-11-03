@@ -500,7 +500,7 @@ def git_branch(cwd):
     key = hashlib.sha1(cwd.encode()).hexdigest()[:16]
     cache = os.path.join(STATE_DIR, "git-" + key)
     try:
-        if os.path.isfile(cache) and time.time() - os.path.getmtime(cache) < 5:
+        if os.path.isfile(cache) and 0 <= time.time() - os.path.getmtime(cache) < 5:
             with open(cache, encoding="utf-8") as f:
                 return f.read()
     except Exception:

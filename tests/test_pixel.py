@@ -402,6 +402,12 @@ check("PNG temp symlink cannot clobber another file", victim.read_bytes() == b'u
 if os.name != 'nt':
     check("PNG activity preview is private", private_png.stat().st_mode & 0o777 == 0o600)
 
+historical = hp.build_office_model([{'sid': 'clock', '_state': 'working',
+    'five': 42, 'five_reset': 1100}], 1000, manager_label='TEST')
+check("model usage expiry uses the supplied snapshot clock",
+      historical['gauges'] is not None and historical['gauges']['five'] == 42,
+      historical['gauges'])
+
 # ------------------------------------------------------------------ result
 
 print()

@@ -960,7 +960,7 @@ def build_office_model(sessions, now, manager_label=None):
             resting.append(row)
 
     # Account-wide 5h/7d, de-flickered across sessions (see hero_board.account_rl).
-    gauges = _hb.account_rl(live)
+    gauges = _hb.account_rl(live, now)
 
     total = sum(_hb.num(s.get("cost")) or 0 for s in live)
     max_ms = max((_hb.num(s.get("dur_ms")) or 0 for s in live), default=0)

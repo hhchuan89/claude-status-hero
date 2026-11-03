@@ -300,6 +300,17 @@ h.update_session('race', {'cost': 12})
         self.assertNotIn('synthetic-private-marker', out.getvalue())
         self.assertIn('replaced', out.getvalue())
 
+    def test_future_git_mtime_is_not_a_permanent_cache_hit(self):
+        hl._ensure_dirs()
+        cwd = str(self.root)
+        key = hl.hashlib.sha1(cwd.encode()).hexdigest()[:16]
+        cache = Path(hl.STATE_DIR) / ('git-' + key)
+        cache.write_text('stale')
+        future = time.time() + 3600
+        os.utime(cache, (future, future))
+        with patch.object(hl.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0, 'fresh\n'), subprocess.CompletedProcess([], 0, '')]):
+            self.assertEqual(hl.git_branch(cwd), 'fresh')
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

@@ -540,7 +540,7 @@ def demo_fleet(frame):
 
 # ----------------------------------------------------------------- renderer
 
-def account_rl(sessions):
+def account_rl(sessions, now=None):
     """The account-wide 5h/7d rate limits, de-flickered.
 
     These percentages are account-global, but each session caches its OWN
@@ -552,11 +552,12 @@ def account_rl(sessions):
     and it's stable. Each metric's reset is paired with the session that
     supplied that metric's max. Returns a dict with five/five_reset/seven/
     seven_reset (values may be None) or None if no session has any yet."""
+    now = time.time() if now is None else now
     out = {"five": None, "five_reset": None, "seven": None, "seven_reset": None}
     got = False
     for key, rkey in (("five", "five_reset"), ("seven", "seven_reset")):
         cand = [s for s in sessions if num(s.get(key)) is not None
-                and (num(s.get(rkey)) is None or num(s.get(rkey)) > time.time())]
+                and (num(s.get(rkey)) is None or num(s.get(rkey)) > now)]
         if cand:
             top = max(cand, key=lambda s: num(s.get(key)))
             out[key] = num(top.get(key))
