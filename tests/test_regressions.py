@@ -68,7 +68,7 @@ class AuditTests(unittest.TestCase):
     def test_ownership_is_not_a_substring(self):
         self.assertFalse(hl.owned_command('echo hero_line.py'))
         self.assertFalse(hl.owned_command('python3 /tmp/other-hero_line.py'))
-        with patch.object(hl, '__file__', "/tmp/a 'quote'/hero_line.py"):
+        with patch.object(hl, '__file__', str(self.root / "a 'quote'" / 'hero_line.py')):
             self.assertTrue(hl.owned_command(hl.shell_cmd(sys.executable, hl.__file__)))
         live = self.root / 'another app' / 'hero_line.py'
         live.parent.mkdir()
@@ -305,9 +305,27 @@ h.update_session('race', {'cost': 12})
         saved = hl.load_json(path)
         saved['ts'] = time.time() - 100
         hl.atomic_write(path, saved)
-        with patch.object(hb, 'live_sids', return_value={'another-window'}):
+        with patch.object(hb, 'live_sids', return_value={'another-window'}), patch.object(hl, 'pid_alive', return_value=True):
             self.assertEqual([s['sid'] for s in hb.fleet()], ['active'])
         self.assertTrue(Path(path).exists())
+
+    def test_registry_omission_buries_a_session_whose_pid_is_unknown(self):
+        # Windows: pid_alive is always None, so the runtime registry is the only
+        # death signal. An X-button close must not leave a permanent ghost.
+        hl._ensure_dirs()
+        for sid, age in (('closed', 100), ('newborn', 10), ('listed', 100)):
+            hl.atomic_write(hl.sess_path(sid), {'sid': sid, 'ts': time.time() - age, 'ppid': 4242, 'state': 'idle'})
+        with patch.object(hb, 'live_sids', return_value={'listed'}), patch.object(hl, 'pid_alive', return_value=None):
+            self.assertEqual({s['sid'] for s in hb.fleet()}, {'newborn', 'listed'})
+        self.assertFalse(Path(hl.sess_path('closed')).exists())
+
+    def test_redaction_is_linear_on_a_large_pasted_blob(self):
+        # A minified JSON paste with one bare-host URL made the userinfo
+        # pattern backtrack quadratically (158 KB took ~8 s in the prompt hook).
+        blob = json.dumps({'source': 'https://example.com', **{'k%d' % i: i for i in range(12000)}}, separators=(',', ':'))
+        start = time.perf_counter()
+        hl.redact(blob)
+        self.assertLess(time.perf_counter() - start, 0.5)
 
     def test_pending_launch_prevents_a_startup_window_storm(self):
         with patch.object(hb, '_board_already_open', return_value=False), patch.object(hb.sys, 'platform', 'darwin'), patch.object(hb, '_mac_launch_board', return_value=0) as launch:

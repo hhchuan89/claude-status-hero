@@ -495,9 +495,11 @@ def fleet(now=None):
         # already dropped it. Bury now instead of a grey ghost for up to 24 h.
         # `if live` -> skip pruning if the registry was unreadable; the ts>90 s
         # guard avoids a startup race with a session younger than its registry
-        # entry.
+        # entry. A PID known to be alive keeps it; an unknown PID (always on
+        # Windows, where the recorded ppid is a short-lived shell) defers to
+        # the registry, which is the only death signal there.
         if (live and s["sid"] not in live and now - (num(s.get("ts")) or 0) > 90
-                and pid_alive(s.get("ppid")) is False):
+                and pid_alive(s.get("ppid")) is not True):
             try:
                 prune_session(path, snapshot)
             except Exception:

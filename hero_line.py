@@ -207,7 +207,7 @@ _SECRETS = re.compile(
     r"|xox[abpr]-[A-Za-z0-9-]+|(?:AKIA|ASIA)[A-Z0-9]{16})\b"
     r"|\bBearer\s+[^\s\"'`,;]+"
     r"|\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"
-    r"|(?<=://)[^\s/@]+:[^\s/]*@"
+    r"|(?<=://)[^\s/@:]+:[^\s/]*@"  # user has no ':', so one split: linear time
     r"|\b(?:[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD))\s*=\s*"
     r"(?:\"[^\"]*\"|'[^']*'|[^\s;,&]+)", re.I)
 
