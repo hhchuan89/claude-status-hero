@@ -311,6 +311,15 @@ h.update_session('race', {'cost': 12})
         with patch.object(hl.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0, 'fresh\n'), subprocess.CompletedProcess([], 0, '')]):
             self.assertEqual(hl.git_branch(cwd), 'fresh')
 
+    def test_statusline_cleanup_keeps_a_day_old_live_process(self):
+        hl.update_session('sleeping', {'state': 'idle', 'ppid': os.getpid()})
+        path = hl.sess_path('sleeping')
+        saved = hl.load_json(path)
+        saved['ts'] = time.time() - 90000
+        hl.atomic_write(path, saved)
+        hl.all_sessions()
+        self.assertTrue(Path(path).exists())
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

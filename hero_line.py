@@ -439,6 +439,19 @@ def prune_session(path, snapshot):
                 pass
 
 
+def pid_alive(pid):
+    p = num(pid)
+    if not p or p <= 0 or os.name == "nt":
+        return None
+    try:
+        os.kill(int(p), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except Exception:
+        return None
+
+
 def all_sessions(cleanup=True):
     out = []
     try:
@@ -454,8 +467,9 @@ def all_sessions(cleanup=True):
         if not s or not isinstance(s.get("sid"), str) or not s.get("sid"):
             continue
         age = now - (num(s.get("ts")) or 0)
-        if s.get("ended") or age > 24 * 3600:
-            if cleanup and (age > 24 * 3600 or (s.get("ended") and age > 600)):
+        expired = age > 24 * 3600 and pid_alive(s.get("ppid")) is not True
+        if s.get("ended") or expired:
+            if cleanup and (expired or (s.get("ended") and age > 600)):
                 try:
                     prune_session(path, s)
                 except OSError:

@@ -408,16 +408,8 @@ def load_json(path):
 
 
 def pid_alive(pid):
-    p = num(pid)
-    if not p or os.name == "nt":   # os.kill(pid,0) semantics unreliable on nt
-        return None
-    try:
-        os.kill(int(p), 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except Exception:
-        return None
+    from hero_line import pid_alive as check
+    return check(pid)
 
 
 def effective_state(s, now=None):
