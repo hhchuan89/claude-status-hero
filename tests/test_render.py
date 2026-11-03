@@ -752,6 +752,10 @@ p = subprocess.run([PY, "-c", rl_code], capture_output=True, text=True,
 check("account_rl returns max snapshot, not newest-ts",
       "rl-ok" in p.stdout, (p.stderr or p.stdout)[:400])
 
+# Audit regressions share the same isolated fixtures.
+from test_regressions import run_checks
+run_checks(check)
+
 # ------------------------------------------------------------------ result
 
 print()

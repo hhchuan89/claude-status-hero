@@ -918,6 +918,18 @@ def settings_file(argv):
     return os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
 
 
+def read_settings(path):
+    """Missing settings are new; unreadable/invalid settings must never be reset."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError("settings must be a JSON object: %s" % path)
+    return data
+
+
 def backup_settings(path):
     if not os.path.isfile(path):
         return None
@@ -937,7 +949,7 @@ def install(argv):
     path = settings_file(argv)
     me = os.path.abspath(__file__)
     py = sys.executable or "python3"
-    data = load_json(path) or {}
+    data = read_settings(path)
     backup = backup_settings(path)
 
     prev = data.get("statusLine")
@@ -974,7 +986,7 @@ def install(argv):
 
 def uninstall(argv):
     path = settings_file(argv)
-    data = load_json(path) or {}
+    data = read_settings(path)
     backup = backup_settings(path)
     sl = data.get("statusLine")
     if isinstance(sl, dict) and MARK in (sl.get("command") or ""):
@@ -1102,7 +1114,7 @@ def main(argv):
             return 1
         save_config({"style": val})
         path = settings_file(argv)
-        data = load_json(path) or {}
+        data = read_settings(path)
         sl = data.get("statusLine")
         if isinstance(sl, dict) and MARK in (sl.get("command") or ""):
             if val in ("fleet", "list"):

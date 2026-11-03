@@ -1261,17 +1261,10 @@ def autostart(state, mode="--pixel"):
     Backs up settings.json, preserves every other hook, idempotent."""
     path = _settings_path()
     try:
-        with open(path, encoding="utf-8") as f:
-            raw = f.read()
-        data = json.loads(raw) if raw.strip() else {}   # empty file == {}
-    except FileNotFoundError:
-        data = {}
+        from hero_line import read_settings
+        data = read_settings(path)
     except Exception as e:
-        # genuinely malformed JSON — refuse rather than clobber the user's file
-        sys.stderr.write("autostart: cannot parse %s (%s); leaving it untouched\n" % (path, e))
-        return 1
-    if not isinstance(data, dict):
-        sys.stderr.write("autostart: %s is not a JSON object\n" % path)
+        sys.stderr.write("autostart: cannot read %s (%s); leaving it untouched\n" % (path, e))
         return 1
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
