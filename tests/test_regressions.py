@@ -246,6 +246,12 @@ h.update_session('race', {'cost': 12})
             self.assertLessEqual(len(lines), rows)
             self.assertTrue(all(hb.disp_width(line) <= cols for line in lines))
 
+    def test_track_does_not_leave_half_a_coin_under_the_hero(self):
+        for width in range(8, 101):
+            for pct in range(101):
+                track = hl.track(pct, width, 'fox')
+                self.assertEqual(hl.disp_width(track), width, (width, pct))
+
 
 def run_checks(check):
     class Results(unittest.TestResult):
