@@ -11,7 +11,7 @@ iTerm2/tmux pane and glance at the whole fleet:
   • state beacon: ⚡ working · ❗ NEEDS YOU (notifies) · 💤 idle
                   🌀 compacting · 👻 stale/ghost
   • last activity per session ("you: fix the tests…", "Bash: pytest -q…")
-  • account-wide 5h / 7d meters + total cost in the header
+  • account-wide 5h / 7d gauges in pixel mode; counts + cost in the TUI
 
 Usage:
   python3 hero_board.py            # the office: emoji pixel office (sixel) → TUI fallback
@@ -100,7 +100,6 @@ def zone(pct):
 # ------------------------------------------------------------- display width
 
 ANSI_TOKEN = re.compile(r"(\x1b\[[0-9;:]*m)")
-CTRL_STRIP = re.compile(r"[\x00-\x1f\x7f]")
 _WIDE_EMOJI_RANGES = ((0x1F000, 0x1FAFF), (0x2600, 0x27BF), (0x2B00, 0x2BFF))
 
 
@@ -445,8 +444,8 @@ def effective_state(s, now=None):
 def live_sids():
     """SessionIds the Claude Code runtime currently tracks as alive.
     ~/.claude/sessions/<pid>.json is pruned on exit (even X-button closes),
-    so it is an OS-independent liveness oracle — unlike pid_alive(), a no-op
-    on nt. Missing/empty dir -> empty set, and fleet() then skips pruning."""
+    but this is an undocumented runtime cache and may be incomplete. Absence
+    alone cannot prove death. Missing/empty dir -> empty set."""
     d = os.path.join(os.path.expanduser("~"), ".claude", "sessions")
     out = set()
     try:
@@ -1041,7 +1040,7 @@ def draw(lines, H):
 # on` installs a SessionStart hook that runs `hero_board.py --ensure`; --ensure
 # opens a NEW terminal window with the board, but ONLY if one isn't already
 # running (singleton, so sessions never stack windows). macOS (iTerm2/Terminal)
-# and Windows (Windows Terminal, `cmd start` fallback) are supported.
+# and Windows (Windows Terminal, new-console fallback) are supported.
 # Fully opt-in — the statusline + board behave exactly as before until you
 # turn it on. hero_line.py's own hooks are never touched.
 

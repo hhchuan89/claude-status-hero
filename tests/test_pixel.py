@@ -15,7 +15,7 @@ Contracts under test:
   3. build_office_model is a pure, crash-proof data-mapping layer: queue
      sort/wait_min math, `need` read ONLY for queue members (the stale-need
      rule), escalation tier boundaries, done-vs-resting split, gauge
-     newest-with-data selection, >8 desks overflow, hostile/NaN inputs.
+     maximum-unexpired-snapshot selection, >8 desks overflow, hostile/NaN inputs.
   4. hero_board.py --pixel falls back to the TUI office (byte-identical,
      zero DCS bytes) whenever sixel is unavailable, and still writes the
      PNG when forced on but piped.
@@ -220,7 +220,7 @@ check("tier 15m == 1", hp.escalation_tier(15) == 1)
 check("tier 29m == 1", hp.escalation_tier(29) == 1)
 check("tier 30m == 2", hp.escalation_tier(30) == 2)
 
-# gauges: pick newest-by-ts session with five is not None
+# gauges: ignore missing snapshots; account_rl chooses unexpired maxima
 sessions = [
     mk("newer", "working", ts=now, five=None),
     mk("older", "working", ts=now - 100, five=42.0, seven=10.0,

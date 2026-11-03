@@ -7,7 +7,7 @@ The contracts under test:
   2. No control chars leak except SGR color sequences.
   3. The hook state machine transitions correctly; SessionEnd tombstones
      (never deletes: an in-flight statusline render must not resurrect the
-     session; the board buries tombstones on sight).
+     session; the board hides fresh tombstones and prunes aged ones).
   4. --install / --uninstall are idempotent and preserve foreign entries.
   5. hero_board --once renders every line at exactly the same width, and
      never crashes across sizes/modes.
@@ -315,7 +315,7 @@ p = subprocess.run([PY, "-c", (
     "print(out)") % LINE], capture_output=True, text=True, encoding="utf-8",
     timeout=15)
 # the dangerous path must be quoted so the shell can't execute the $(...) —
-# POSIX shlex uses single quotes, the Windows branch uses double quotes.
+# POSIX shlex quotes apply on both platforms.
 _meta_expect = "'/tmp/a$(rm -rf x)/b.py'"
 check("shell_cmd quotes metachars", _meta_expect in p.stdout, p.stdout.strip())
 
@@ -335,7 +335,7 @@ for cols, rows in (("60", "15"), ("100", "30"), ("200", "50")):
             widths = {disp_width(ln) for ln in out}
             check(tag + " uniform width", len(widths) == 1
                   and widths == {int(cols) - 1}, "got %s" % sorted(widths))
-            check(tag + " fits height", len(out) <= int(rows) + 22,
+            check(tag + " fits height", len(out) <= int(rows),
                   "got %d lines" % len(out))
 
 # board reads real session files: stale cleanup + ordering
@@ -648,7 +648,7 @@ check("--style bogus rejected", p.returncode == 1)
 # ------------------------------------------------- 7: auto-launch (--autostart)
 # The board's opt-in SessionStart hook that opens a board window when Claude
 # Code starts. Cross-platform: the hook command must be shell-safe on Windows
-# (forward slashes, no POSIX single-quotes), idempotent, and preserve foreign
+# (forward slashes and POSIX quoting), idempotent, and preserve foreign
 # hooks. The singleton guard (pidfile) must stop a second session stacking a
 # board — tested without opening a real window (launchers monkeypatched).
 

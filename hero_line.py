@@ -2,8 +2,8 @@
 """claude-status-hero · hero_line.py — the gauge.
 
 A Claude Code statusline that is fun but NEVER jitters:
-  • always exactly 3 lines, each padded/cropped to an exact display width
-  • a hero emoji walks the 5-hour rate-limit track (coins at budget quarters)
+  • fixed height per style: 3 gauge / 7 list / 10 fleet lines, exact display width
+  • a hero emoji walks the 5-hour rate-limit track (coins at 20% budget marks)
   • context + 7-day meters, git, cost, and a cross-window fleet summary
   • doubles as the hook handler + state writer for hero_board.py
 
@@ -137,7 +137,6 @@ def hero_glyph(name):
 # ------------------------------------------------------------- display width
 
 ANSI_TOKEN = re.compile(r"(\x1b\[[0-9;:]*m)")
-CTRL_STRIP = re.compile(r"[\x00-\x1f\x7f]")
 
 _WIDE_EMOJI_RANGES = ((0x1F000, 0x1FAFF), (0x2600, 0x27BF), (0x2B00, 0x2BFF))
 
@@ -904,7 +903,7 @@ def handle_hook(event):
     if event == "SessionEnd":
         # tombstone, not delete: an in-flight statusline render (git can take
         # seconds) would otherwise resurrect the file after os.remove and the
-        # board would show a zombie lane. The board buries tombstones on sight.
+        # board would show a zombie lane. The board hides tombstones at once and prunes them after a grace period.
         with session_lock():
             atomic_write(sess_path(sid), {"sid": str(sid)[:80], "ended": True,
                                          "ts": now})
@@ -959,8 +958,6 @@ HOOK_EVENTS = [
     ("PostCompact", None, "PostCompact"),
     ("SessionEnd", None, "SessionEnd"),
 ]
-
-MARK = "hero_line.py"  # our entries are recognized by this substring
 
 
 def shell_cmd(*parts):
@@ -1057,7 +1054,8 @@ def install(argv):
     atomic_write_pretty(path, data)
     print("installed → %s" % path)
     print("  statusline : %s" % shell_cmd(py, me))
-    print("  hooks      : %d events (state for hero_board.py)" % len(HOOK_EVENTS))
+    print("  hooks      : %d entries across %d events (state for hero_board.py)"
+          % (len(HOOK_EVENTS), len(events)))
     if prev and not (isinstance(prev, dict) and owned_command(prev.get("command"))):
         print("  replaced   : %s" % json.dumps(prev))
     print("  rollback   : %s" % (shell_cmd("cp", backup, path) if backup else "remove the newly created settings file"))
@@ -1265,7 +1263,7 @@ def main(argv):
         doctor()
         return 0
 
-    # statusline mode: never crash, always 3 lines
+    # statusline mode: preserve the configured height, including on errors
     try:
         data = json.loads(sys.stdin.read(1000000) or "{}")
         if not isinstance(data, dict):

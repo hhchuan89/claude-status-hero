@@ -37,7 +37,7 @@ lives where motion is possible.
 
 ## hero_line.py — the gauge (per window)
 
-Three lines, **always exactly three**, each padded/cropped to an exact display
+The default gauge has exactly three lines (list: seven, fleet: ten), each padded/cropped to an exact display
 width `W = clamp(1, COLUMNS-2, 100)`. Missing data renders as dim `--`
 placeholders — a row is never dropped.
 
@@ -50,7 +50,7 @@ ctx ████████░░░░ 42% 84/200k · 7d ███░░░░
 - **L1 identity**: dir, model, git branch (+dirty count), effort, session cost,
   elapsed. Left/right groups joined by a padding spacer.
 - **L2 the 5h track**: hero emoji walks left→right with the 5-hour window.
-  ⭐ coins sit at 20/40/60/80 % (budget quarter-marks — decorative *and*
+  ⭐ coins sit at 20/40/60/80 % (20% budget marks — decorative *and*
   functional); 🏁 at 100 %. Track/percent zone-coloured green→yellow→red.
   No rate limits (API billing) → dim track, hero at start, `--%`.
 - **L3 meters**: context bar (input-token %, the compaction driver), 7-day bar,
@@ -82,17 +82,18 @@ automatically; default is `--pixel` on macOS, `--office` on Windows):
   via a hand-rolled sixel encoder (see hero_pixel.py) — emoji heroes baked to
   pixels (Pillow when importable, stdlib sprites otherwise). Falls back to
   `--office` automatically when the terminal can't show sixel.
-- **`--office`**: a half-block TUI office — same rooms (desks, a manager-room
-  queue sorted longest-wait-first, a pantry), typed not drawn. A narrow pane or
+- **`--office`**: a TUI office with desks and a pantry. It has no sorted
+  manager-room queue; that belongs to the pixel view. A narrow pane or
   >8 sessions falls back further to a dense one-row-per-session list.
 
 Each session shows a state beacon (⚡ working, ❗ needs you, 💤 idle,
 🌀 compacting, 👻 stale) plus name + last activity + cost; the header HUD has
-account-wide 5h + 7d bars, total cost, and the live-session count.
+account-wide 5h + 7d gauges in the pixel view. The TUI header shows total cost
+and the live-session count.
 
 **Last activity** comes from hooks: last prompt snippet (UserPromptSubmit) or
 last tool (`PostToolUse` → "Bash: pytest -q…"). That answers "which window is
-doing what" at a glance. `--notify` (default on, macOS) fires a notification
+doing what" at a glance. Notifications (default on, macOS; disable with `--no-notify`) fire
 when any session flips to needs-you.
 
 ## State machine (hooks → session file)
@@ -266,7 +267,7 @@ session→window mapping is proven.
   Sixel bugs in the animated-redraw case. The resolution isn't to refuse Sixel
   but to **detect** it (`hero_pixel.detect_sixel()`: env override → isatty gate
   → DA1 probe) and fall back automatically to the half-block `--office` TUI
-  when it's absent — same rooms, typed instead of drawn. iTerm2 gets the drawn
+  when it's absent. iTerm2 gets the drawn
   emoji office; tmux / Windows Terminal / plain TTYs get the typed one. The
   Sixel code is confined to `hero_pixel.py`, which the board only spawns after
   the probe passes.
@@ -281,5 +282,6 @@ session→window mapping is proven.
 ## Distribution
 
 `git clone` + `python3 hero_line.py --install` (backs up settings.json, writes
-statusLine + hooks entries, idempotent; `--uninstall` restores). Board is just
+statusLine + hooks entries, idempotent; restore the backup to roll back, while
+`--uninstall` removes this installation's entries). Board is just
 `python3 hero_board.py` in any spare pane.

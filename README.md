@@ -84,14 +84,15 @@ Open a spare pane, run `python3 hero_board.py`, keep it in the corner. It's an
 flip to **NEEDS YOU** queue in the **manager room** (longest wait first), and
 idle ones drift to the **pantry**. Beacons mark state — ⚡ working · ❗ needs
 you (notifies) · 💤 idle · 🌀 compacting · 👻 stale — each desk carries its
-last activity + cost, and the header has account-wide 5h/7d meters + total cost.
+last activity and cost. The pixel HUD has account-wide 5h/7d gauges; the TUI
+header shows counts and total cost.
 
 It draws two ways, chosen automatically:
 
 - **`--pixel`** — the emoji pixel office, real sixel graphics (the default
   wherever the terminal can show sixel).
 - **`--office`** — a half-block TUI office it falls back to when sixel isn't
-  available; same rooms, typed instead of drawn.
+  available; desks and a pantry, with a dense list for larger fleets.
 
 `q` quits; `--fps 8` for smoother motion. A bare `python3 hero_board.py` opens
 whichever the terminal can show.
@@ -133,7 +134,8 @@ python3 hero_board.py --pixel --scale 2  # 2× nearest-neighbour for Retina pane
 ### The office (`--office`) — the TUI fallback
 
 The half-block floor plan `--pixel` drops to when the terminal can't show sixel
-graphics — same rooms, typed instead of drawn. A floor plan, not a lineup. Each
+graphics. It has desks and a pantry; the sorted manager-room queue belongs to
+the pixel view. Each
 session's actor is a single **emoji — the
 exact same hero glyph its statusline already shows** (🦊🐱🐸🦉🐧🐰🐻🦆), so
 a glance links a PowerShell/iTerm/tmux window to its desk on the board. Every
@@ -176,7 +178,7 @@ It adds one `SessionStart` hook that runs `hero_board.py --ensure <mode>`
 **`--office`** on Windows, since the sixel pixel office needs a macOS-class
 terminal; pass `--pixel` or `--office` to override), which opens
 a new terminal window (iTerm2/Terminal on macOS, Windows Terminal on Windows,
-with a `cmd start` console fallback) — but **only if a board isn't already
+with a direct new-console fallback) — but **only if a board isn't already
 running** (singleton, so extra Claude Code windows never stack more boards).
 It backs up `settings.json` and leaves every other hook untouched;
 `hero_line.py`'s own hooks are not affected.
@@ -194,8 +196,12 @@ python3 hero_board.py --demo       # try the board right now, with fake data
 ```
 
 `--install` backs up your `settings.json` first and prints the rollback
-command; `--uninstall` removes exactly our entries and nothing else. The hooks
-(9 events, 5 s timeout, always exit 0) are what feed per-session state to the
+command. Restore that backup to recover a previous statusline; `--uninstall`
+only removes this installation's entries. Invalid JSON and symlink settings
+are refused. Other valid settings and hooks are preserved, including commands
+sharing a hook group. If you move this checkout, remove its old registration
+before reinstalling; commands pointing to other paths are left untouched. The hooks
+(9 entries across 8 events, 5 s timeout, always exit 0) are what feed per-session state to the
 board — without them you still get metrics, just not working/needs-you.
 
 **Run `--install` on each machine.** It bakes the machine's absolute Python
@@ -238,7 +244,7 @@ hero_board.py ──reads all, 4 fps──────────┘
 
 States: `SessionStart/UserPromptSubmit/PostToolUse → working`,
 `Notification(permission|idle) → needs_you`, `Stop → idle`,
-`Pre/PostCompact → compacting`, `SessionEnd → tombstone` (not a delete: an
+`PreCompact → compacting`, `PostCompact → working`, `SessionEnd → tombstone` (not a delete: an
 in-flight statusline render can land seconds later and must not resurrect
 the session; the board hides tombstones at once and buries them after a
 minute). A session whose
@@ -253,7 +259,7 @@ python3 tests/test_render.py   # 1200+ checks: geometry, hooks, installer, board
 python3 tests/test_pixel.py    # pixel office: sixel/PNG encoders, data mapping, fallback
 ```
 
-The suite hammers the invariants: always 3 lines, exact display width for
+The suite hammers the invariants: 3 gauge / 7 list / 10 fleet lines, exact display width for
 every payload × terminal width × glyph mode, ANSI-injection sanitization,
 installer idempotence, foreign-hook preservation.
 
