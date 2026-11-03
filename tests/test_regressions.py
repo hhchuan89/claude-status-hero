@@ -68,7 +68,9 @@ class AuditTests(unittest.TestCase):
     def test_ownership_is_not_a_substring(self):
         self.assertFalse(hl.owned_command('echo hero_line.py'))
         self.assertFalse(hl.owned_command('python3 /tmp/other-hero_line.py'))
-        self.assertTrue(hl.owned_command(hl.shell_cmd(sys.executable, "/tmp/a 'quote'/hero_line.py")))
+        with patch.object(hl, '__file__', "/tmp/a 'quote'/hero_line.py"):
+            self.assertTrue(hl.owned_command(hl.shell_cmd(sys.executable, hl.__file__)))
+        self.assertFalse(hl.owned_command(hl.shell_cmd(sys.executable, '/another/app/hero_line.py')))
 
     def test_concurrent_metrics_cannot_rollback_hook(self):
         hl.update_session('race', {'state': 'working', 'state_ts': 1})

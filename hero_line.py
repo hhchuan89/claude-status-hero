@@ -1041,7 +1041,7 @@ def install(argv):
         hooks = {}
         data["hooks"] = hooks
     events = {e for e, _m, _a in HOOK_EVENTS}
-    for event in events:  # sweep our stale entries once per event, keep others
+    for event in events:  # sweep this installation's entries, keep others
         cur = hooks.get(event, [])
         if not isinstance(cur, list):
             cur = []                  # malformed per-event value → reset
@@ -1099,7 +1099,11 @@ def owned_command(command, script="hero_line.py", mode=None):
         parts = shlex.split(command)
     except ValueError:
         return False
-    if len(parts) < 2 or ntpath.basename(parts[1]) != script:
+    if len(parts) < 2:
+        return False
+    expected = os.path.join(os.path.dirname(os.path.abspath(__file__)), script)
+    normalize = ntpath.normcase if os.name == "nt" else os.path.normpath
+    if normalize(parts[1]) != normalize(expected):
         return False
     if not re.fullmatch(r"(?:python(?:[0-9]+(?:\.[0-9]+)*)?|py)(?:\.exe)?",
                         ntpath.basename(parts[0]), re.I):
