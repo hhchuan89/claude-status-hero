@@ -37,16 +37,21 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+from support import isolate
+isolate(ROOT)
 LINE = os.path.join(ROOT, "hero_line.py")
 BOARD = os.path.join(ROOT, "hero_board.py")
 PY = sys.executable or "python3"
 
 ANSI = re.compile(r"\x1b\[[0-9;:]*m")
 FAILS = []
+PASSES = 0
 
 
 def check(name, cond, detail=""):
+    global PASSES
     if cond:
+        PASSES += 1
         print("  ok  %s" % name)
     else:
         FAILS.append(name)
@@ -86,7 +91,21 @@ def run(script, args=(), stdin="", env_extra=None, cols="100", lines="30"):
     env["LINES"] = lines
     if env_extra:
         env.update(env_extra)
-    p = subprocess.run([PY, script] + list(args), input=stdin,
+    # Exercise administrative writers as library calls against fixture files;
+    # never execute installer/autostart CLI commands in the test suite.
+    command = [PY, script] + list(args)
+    if args and args[0] in ("--install", "--uninstall", "--autostart"):
+        action = args[0]
+        if action == "--autostart":
+            call = "m.autostart(%r)" % args[1]
+        else:
+            call = "m.%s(%r)" % (action[2:], list(args[1:]))
+        code = ("import importlib.util; "
+                "s=importlib.util.spec_from_file_location('fixture', %r); "
+                "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+                "r=%s; raise SystemExit(r or 0)") % (script, call)
+        command = [PY, "-c", code]
+    p = subprocess.run(command, input=stdin,
                        capture_output=True, text=True, encoding="utf-8",
                        timeout=30, env=env)
     return p
@@ -741,5 +760,4 @@ if FAILS:
     for f in FAILS[:20]:
         print("  - " + f)
     sys.exit(1)
-n = "all green"
-print(n)
+print("%d passed, %d failed" % (PASSES, len(FAILS)))

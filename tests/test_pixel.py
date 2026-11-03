@@ -34,16 +34,21 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+from support import isolate
+isolate(ROOT)
 sys.path.insert(0, ROOT)
 BOARD = os.path.join(ROOT, "hero_board.py")
 PIXEL = os.path.join(ROOT, "hero_pixel.py")
 PY = sys.executable or "python3"
 
 FAILS = []
+PASSES = 0
 
 
 def check(name, cond, detail=""):
+    global PASSES
     if cond:
+        PASSES += 1
         print("  ok  %s" % name)
     else:
         FAILS.append(name)
@@ -92,10 +97,11 @@ fb2.set(0, 0, 1)
 d2 = hp.encode_sixel(fb2).decode("ascii")
 check("sixel short run (<4) not RLE-compressed", "!1" not in d2 and "!2" not in d2 and "!3" not in d2, d2)
 
-check("sixel demo scene under 1s", True)  # timing asserted below
+t_scene = time.monotonic()
 sessions = hp.demo_fleet(time.time())
 model = hp.build_office_model(sessions, time.time())
 big_fb = hp.draw_office(model, time.time())
+check("sixel demo scene under 1s", time.monotonic() - t_scene < 1.0)
 t0 = time.time()
 hp.encode_sixel(big_fb)
 t1 = time.time()
@@ -368,4 +374,4 @@ if FAILS:
     for f in FAILS[:30]:
         print("  - " + f)
     sys.exit(1)
-print("all green")
+print("%d passed, %d failed" % (PASSES, len(FAILS)))
