@@ -47,6 +47,26 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(hb.autostart('on'), 1)
             self.assertEqual(self.settings.read_text(), raw)
 
+    def test_mixed_hooks_preserve_foreign_entries(self):
+        own = {'type': 'command', 'command': hl.shell_cmd(sys.executable, str(ROOT / 'hero_line.py'), '--hook', 'Stop')}
+        foreign = {'type': 'command', 'command': 'echo hero_line.py --hook Stop'}
+        group = {'matcher': '*', 'extra': 9, 'hooks': [own, foreign]}
+        self.settings.write_text(json.dumps({'custom': 1, 'hooks': {'Stop': [group]}}))
+        hl.uninstall(['--settings', str(self.settings)])
+        result = json.loads(self.settings.read_text())
+        self.assertEqual(result['hooks']['Stop'], [dict(group, hooks=[foreign])])
+        self.assertEqual(result['custom'], 1)
+        board_own = dict(own, command=hb.shell_cmd(sys.executable, str(ROOT / 'hero_board.py'), '--ensure', '--pixel'))
+        group['hooks'] = [board_own, foreign]
+        self.settings.write_text(json.dumps({'hooks': {'SessionStart': [group]}}))
+        self.assertEqual(hb.autostart('off'), 0)
+        self.assertEqual(json.loads(self.settings.read_text())['hooks']['SessionStart'], [dict(group, hooks=[foreign])])
+
+    def test_ownership_is_not_a_substring(self):
+        self.assertFalse(hl.owned_command('echo hero_line.py'))
+        self.assertFalse(hl.owned_command('python3 /tmp/other-hero_line.py'))
+        self.assertTrue(hl.owned_command(hl.shell_cmd(sys.executable, "/tmp/a 'quote'/hero_line.py")))
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

@@ -964,7 +964,7 @@ def install(argv):
         cur = hooks.get(event, [])
         if not isinstance(cur, list):
             cur = []                  # malformed per-event value → reset
-        hooks[event] = [g for g in cur if not _is_ours(g)]
+        hooks[event] = remove_owned_hooks(cur)
     for event, matcher, arg in HOOK_EVENTS:
         entry = {"hooks": [{"type": "command",
                             "command": shell_cmd(py, me, "--hook", arg),
@@ -977,7 +977,7 @@ def install(argv):
     print("installed → %s" % path)
     print("  statusline : %s" % shell_cmd(py, me))
     print("  hooks      : %d events (state for hero_board.py)" % len(HOOK_EVENTS))
-    if prev and MARK not in json.dumps(prev):
+    if prev and not (isinstance(prev, dict) and owned_command(prev.get("command"))):
         print("  replaced   : %s" % json.dumps(prev))
     print("  rollback   : cp '%s' '%s'  (or --uninstall)" % (backup, path))
     print("takes effect on the next statusline refresh; open a new Claude Code"
@@ -989,14 +989,14 @@ def uninstall(argv):
     data = read_settings(path)
     backup = backup_settings(path)
     sl = data.get("statusLine")
-    if isinstance(sl, dict) and MARK in (sl.get("command") or ""):
+    if isinstance(sl, dict) and owned_command(sl.get("command")):
         del data["statusLine"]
     hooks = data.get("hooks")
     if isinstance(hooks, dict):
         for event in list(hooks.keys()):
             if not isinstance(hooks[event], list):
                 continue              # not ours to touch
-            kept = [g for g in hooks[event] if not _is_ours(g)]
+            kept = remove_owned_hooks(hooks[event])
             if kept:
                 hooks[event] = kept
             else:
@@ -1007,11 +1007,42 @@ def uninstall(argv):
     print("uninstalled (backup: %s)" % backup)
 
 
-def _is_ours(group):
-    try:
-        return any(MARK in (h.get("command") or "") for h in group.get("hooks", []))
-    except Exception:
+def owned_command(command, script="hero_line.py", mode=None):
+    """Recognize our Python invocation, not arbitrary mentions in other hooks."""
+    if not isinstance(command, str):
         return False
+    import ntpath
+    import shlex
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    if len(parts) < 2 or ntpath.basename(parts[1]) != script:
+        return False
+    if not re.fullmatch(r"(?:python(?:[0-9]+(?:\.[0-9]+)*)?|py)(?:\.exe)?",
+                        ntpath.basename(parts[0]), re.I):
+        return False
+    if mode is not None:
+        return len(parts) in (3, 4) and parts[2] == mode
+    return len(parts) == 2 or (len(parts) == 4 and parts[2] == "--hook"
+                              and parts[3] in {a for _e, _m, a in HOOK_EVENTS})
+
+
+def remove_owned_hooks(groups, script="hero_line.py", mode=None):
+    """Remove only owned commands inside a group; keep its other metadata."""
+    out = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            out.append(group)
+            continue
+        kept = [h for h in group["hooks"] if not (isinstance(h, dict)
+                and h.get("type") == "command"
+                and owned_command(h.get("command"), script, mode))]
+        if kept == group["hooks"]:
+            out.append(group)
+        elif kept:
+            out.append(dict(group, hooks=kept))
+    return out
 
 
 def atomic_write_pretty(path, data):
@@ -1116,7 +1147,7 @@ def main(argv):
         path = settings_file(argv)
         data = read_settings(path)
         sl = data.get("statusLine")
-        if isinstance(sl, dict) and MARK in (sl.get("command") or ""):
+        if isinstance(sl, dict) and owned_command(sl.get("command")):
             if val in ("fleet", "list"):
                 sl["refreshInterval"] = 2   # keep other windows' states fresh
             else:

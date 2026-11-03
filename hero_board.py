@@ -1251,8 +1251,8 @@ def _win_launch_board(py, board, extra):
 
 
 def _is_our_autostart(group):
-    s = json.dumps(group)
-    return "--ensure" in s and "hero_board.py" in s
+    from hero_line import remove_owned_hooks
+    return remove_owned_hooks([group], "hero_board.py", "--ensure") != [group]
 
 
 def autostart(state, mode="--pixel"):
@@ -1275,7 +1275,8 @@ def autostart(state, mode="--pixel"):
     if state == "status":
         print("auto-launch: %s" % ("ON" if any(_is_our_autostart(g) for g in ss) else "off"))
         return 0
-    ss = [g for g in ss if not _is_our_autostart(g)]   # idempotent
+    from hero_line import remove_owned_hooks
+    ss = remove_owned_hooks(ss, "hero_board.py", "--ensure")
     if state == "on":
         # Always write an explicit mode so the hook is unambiguous (and so the
         # OS-aware default in main() can't silently override the chosen mode).
