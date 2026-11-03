@@ -237,6 +237,15 @@ h.update_session('race', {'cost': 12})
         self.assertEqual(victim.read_text(), 'untouched')
         self.assertEqual(Path(hb._pidfile()).read_text(), str(os.getpid()))
 
+    def test_board_frames_fit_small_terminals(self):
+        for cols, rows in ((20, 5), (1, 1), (40, 10)):
+            out = io.StringIO()
+            with patch.object(hb.shutil, 'get_terminal_size', return_value=os.terminal_size((cols, rows))), patch.object(hb.sys, 'stdout', out):
+                self.assertEqual(hb.main(['--office', '--demo', '--once']), 0)
+            lines = out.getvalue().splitlines()
+            self.assertLessEqual(len(lines), rows)
+            self.assertTrue(all(hb.disp_width(line) <= cols for line in lines))
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

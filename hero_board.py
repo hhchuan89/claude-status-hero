@@ -1396,13 +1396,14 @@ def main(argv):
 
     def one_frame():
         size = shutil.get_terminal_size((100, 30))
-        W, H = max(60, size.columns), max(12, size.lines)
+        W, H = max(1, size.columns), max(1, size.lines)
         sessions = demo_fleet(frame) if demo else fleet()
         if not demo:
             notify(sessions, enabled_notify)
-        lines = render_office(sessions, W - 1, H - 1, frame, demo,
+        lines = render_office(sessions, max(1, W - 1), max(1, H - 1), frame, demo,
                               None if once else ostate)
-        lines.append(crop_pad(DIM + "  q quit" + RESET, W - 1))
+        lines = lines[:H - 1]
+        lines.append(crop_pad(DIM + "  q quit" + RESET, max(1, W - 1)))
         return lines, H
 
     enable_vt()
