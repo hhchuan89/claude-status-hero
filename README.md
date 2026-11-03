@@ -145,6 +145,12 @@ usage meters on the floor plan, the statusline already has those. A **speech
 bubble** pops up over a working/compacting/needs-you actor carrying its
 current activity (`Bash: pytest -q…`, `you: fix the tests…`).
 
+Prompt snippets (60 characters) and tool hints (40 characters) mask recognized
+credential patterns before storage. To hide all prompt and tool text during
+screen sharing, run `python3 hero_line.py --snippets off`; this also clears saved
+activity from session files. `--snippets on` restores snippets (the default).
+Other text, such as project names and branches, remains visible.
+
 Each session owns a **column**: its desk at the top, its break-room
 (**茶水间**) spot at the bottom. Going **idle** walks the hero down its column
 to the break room, and back up when it resumes. **Open a new Claude Code

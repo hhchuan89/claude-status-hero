@@ -12,6 +12,7 @@ Modes (first argument):
   --hook EVENT    hook handler: update this session's state file, print nothing
   --install       register statusline + hooks in ~/.claude/settings.json
   --uninstall     remove our entries (a timestamped backup is written either way)
+  --snippets X    on|off: store redacted prompt/tool snippets (default on)
   --style X       statusline style, persisted in config.json:
                     gauge  3 lines: HUD + 5h track + meters (default)
                     list   7 lines: gauge + one compact fleet row per session
@@ -199,6 +200,21 @@ def sanitize(s, limit=120):
     if len(s) > limit:
         s = s[: limit - 2] + ".."
     return s
+
+
+_SECRETS = re.compile(
+    r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]+|(?:ghp_|gho_|github_pat_)[A-Za-z0-9_]+"
+    r"|xox[abpr]-[A-Za-z0-9-]+|(?:AKIA|ASIA)[A-Z0-9]{16})\b"
+    r"|\bBearer\s+[^\s\"'`,;]+"
+    r"|\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"
+    r"|(?<=://)[^\s/@]+:[^\s/]*@"
+    r"|\b(?:[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD))\s*=\s*"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s;,&]+)", re.I)
+
+
+def redact(s):
+    """Mask recognizable credentials before truncation or persistence."""
+    return _SECRETS.sub("[REDACTED]", s) if isinstance(s, str) else ""
 
 
 # ------------------------------------------------------------------- helpers
@@ -399,17 +415,30 @@ def file_lock(path, timeout=1.0):
         os.close(fd)
 
 
-def session_lock():
+def session_lock(timeout=1.0):
     _ensure_dirs()
-    return file_lock(os.path.join(STATE_DIR, "sessions.lock"))
+    return file_lock(os.path.join(STATE_DIR, "sessions.lock"), timeout=timeout)
 
 
-def update_session(sid, updates, resume=False):
+@contextmanager
+def hook_session_lock():
+    # Hooks have a 5s timeout. After 3s, retain the original last-writer-wins
+    # behavior rather than silently losing a state change (including SessionEnd).
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(session_lock(timeout=3.0))
+        except TimeoutError:
+            pass
+        yield
+
+
+def update_session(sid, updates, resume=False, hook=False):
     if not sid:
         return
     sid = session_key(sid)
     try:
-        with session_lock():
+        with hook_session_lock() if hook else session_lock():
             path = sess_path(sid)
             s = load_json(path) or {}
             if s.get("ended") and not resume:
@@ -417,6 +446,9 @@ def update_session(sid, updates, resume=False):
             if resume:
                 s.pop("ended", None)
             s.update(updates)
+            if load_config().get("snippets", "on") == "off":
+                s.pop("activity", None)
+                s.pop("activity_ts", None)
             s["sid"] = str(sid)[:80]
             s["ts"] = time.time()
             if "hero" not in s:
@@ -477,7 +509,8 @@ def all_sessions(cleanup=True):
         if not s or not isinstance(s.get("sid"), str) or not s.get("sid"):
             continue
         age = now - (num(s.get("ts")) or 0)
-        expired = age > 24 * 3600 and pid_alive(s.get("ppid")) is not True
+        expired = (age > 24 * 3600 and pid_alive(s.get("ppid")) is False
+                   or age > 7 * 24 * 3600 and not s.get("ppid"))
         if s.get("ended") or expired:
             if cleanup and (expired or (s.get("ended") and age > 600)):
                 try:
@@ -900,7 +933,7 @@ def fleet_summary(sessions, own_sid):
 # ---------------------------------------------------------------- hook mode
 
 def handle_hook(event):
-    """Update session state. Must NEVER block or fail (exit 0 always)."""
+    """Update session state with a bounded lock wait (CLI always exits 0)."""
     raw, total = [], 0
     try:
         while True:                     # read to EOF: a PostToolUse payload
@@ -932,7 +965,7 @@ def handle_hook(event):
         # tombstone, not delete: an in-flight statusline render (git can take
         # seconds) would otherwise resurrect the file after os.remove and the
         # board would show a zombie lane. The board hides tombstones at once and prunes them after a grace period.
-        with session_lock():
+        with hook_session_lock():
             atomic_write(sess_path(sid), {"sid": str(sid)[:80], "ended": True,
                                          "ts": now})
         return
@@ -945,17 +978,17 @@ def handle_hook(event):
                "cwd": sanitize(payload.get("cwd") or "", 200),
                "dir": sanitize(os.path.basename(cwd) or "?", 24)}
     elif event == "UserPromptSubmit":
-        snippet = sanitize(payload.get("prompt") or "", 60)
+        snippet = sanitize(redact(payload.get("prompt")), 60)
         upd = {"state": "working", "state_ts": now,
                "activity": ("you: " + snippet) if snippet else "prompt",
                "activity_ts": now}
     elif event == "PostToolUse":
-        tool = sanitize(payload.get("tool_name") or "tool", 24)
+        tool = sanitize(redact(payload.get("tool_name") or "tool"), 24)
         ti = payload.get("tool_input") or {}
         hint = ""
         if isinstance(ti, dict):
-            hint = sanitize(ti.get("command") or ti.get("file_path")
-                            or ti.get("description") or ti.get("prompt") or "", 40)
+            hint = sanitize(redact(ti.get("command") or ti.get("file_path")
+                            or ti.get("description") or ti.get("prompt") or ""), 40)
         upd = {"state": "working", "state_ts": now,
                "activity": tool + (": " + hint if hint else ""), "activity_ts": now}
     elif event == "NeedsYouPermission":
@@ -970,7 +1003,7 @@ def handle_hook(event):
         upd = {"state": "working", "state_ts": now}
     else:
         return
-    update_session(sid, upd, resume=(event == "SessionStart"))
+    update_session(sid, upd, resume=(event == "SessionStart"), hook=True)
 
 
 # ------------------------------------------------------------ install logic
@@ -1053,7 +1086,11 @@ def install(argv):
     backup = backup_settings(path)
 
     prev = data.get("statusLine")
-    sl = dict(prev) if isinstance(prev, dict) and owned_command(prev.get("command")) else {}
+    prev_owned = isinstance(prev, dict) and owned_command(prev.get("command"))
+    stale = [prev] if prev_owned and owned_command(prev.get("command"), stale_only=True) else []
+    if isinstance(prev, dict) and not prev_owned:
+        save_config({"replaced_statusline": prev})
+    sl = dict(prev) if prev_owned else {}
     sl.update(type="command", command=shell_cmd(py, me), padding=0)
     if load_config().get("style") in ("fleet", "list"):
         sl["refreshInterval"] = 2
@@ -1070,7 +1107,7 @@ def install(argv):
         cur = hooks.get(event, [])
         if not isinstance(cur, list):
             cur = []                  # malformed per-event value → reset
-        hooks[event] = remove_owned_hooks(cur)
+        hooks[event] = remove_owned_hooks(cur, stale_entries=stale)
     for event, matcher, arg in HOOK_EVENTS:
         entry = {"hooks": [{"type": "command",
                             "command": shell_cmd(py, me, "--hook", arg),
@@ -1084,8 +1121,9 @@ def install(argv):
     print("  statusline : %s" % shell_cmd(py, me))
     print("  hooks      : %d entries across %d events (state for hero_board.py)"
           % (len(HOOK_EVENTS), len(events)))
-    if prev and not (isinstance(prev, dict) and owned_command(prev.get("command"))):
-        print("  replaced   : previous statusline (saved in backup)")
+    print("  stale entries swept: %d" % len(stale))
+    if prev and not prev_owned:
+        print("  replaced   : previous statusline (saved in config and backup)")
     print("  rollback   : %s" % (shell_cmd("cp", backup, path) if backup else "remove the newly created settings file"))
     print("takes effect on the next statusline refresh; open a new Claude Code"
           " window (or send a message) to see it.")
@@ -1097,14 +1135,23 @@ def uninstall(argv):
     data = read_settings(path)
     backup = backup_settings(path)
     sl = data.get("statusLine")
+    stale = []
+    restored = False
     if isinstance(sl, dict) and owned_command(sl.get("command")):
-        del data["statusLine"]
+        if owned_command(sl.get("command"), stale_only=True):
+            stale.append(sl)
+        replaced = load_config().get("replaced_statusline")
+        if isinstance(replaced, dict):
+            data["statusLine"] = replaced
+            restored = True
+        else:
+            del data["statusLine"]
     hooks = data.get("hooks")
     if isinstance(hooks, dict):
         for event in list(hooks.keys()):
             if not isinstance(hooks[event], list):
                 continue              # not ours to touch
-            kept = remove_owned_hooks(hooks[event])
+            kept = remove_owned_hooks(hooks[event], stale_entries=stale)
             if kept:
                 hooks[event] = kept
             else:
@@ -1113,9 +1160,12 @@ def uninstall(argv):
             data.pop("hooks", None)
     atomic_write_pretty(path, data)
     print("uninstalled (backup: %s)" % backup)
+    print("  stale entries swept: %d" % len(stale))
+    if restored:
+        print("  restored previous statusline")
 
 
-def owned_command(command, script="hero_line.py", mode=None):
+def owned_command(command, script="hero_line.py", mode=None, stale_only=False):
     """Recognize our Python invocation, not arbitrary mentions in other hooks."""
     if not isinstance(command, str):
         return False
@@ -1129,7 +1179,15 @@ def owned_command(command, script="hero_line.py", mode=None):
         return False
     expected = os.path.join(os.path.dirname(os.path.abspath(__file__)), script)
     normalize = ntpath.normcase if os.name == "nt" else os.path.normpath
-    if normalize(parts[1]) != normalize(expected):
+    stale = False
+    if script == "hero_line.py" and os.path.isabs(parts[1]) and ntpath.basename(parts[1]) == script:
+        try:
+            os.stat(parts[1])
+        except FileNotFoundError:
+            stale = True
+        except OSError:
+            pass  # inaccessible is not proof that another tool is gone
+    if (stale_only and not stale) or (normalize(parts[1]) != normalize(expected) and not stale):
         return False
     if not re.fullmatch(r"(?:python(?:[0-9]+(?:\.[0-9]+)*)?|py)(?:\.exe)?",
                         ntpath.basename(parts[0]), re.I):
@@ -1140,16 +1198,21 @@ def owned_command(command, script="hero_line.py", mode=None):
                               and parts[3] in {a for _e, _m, a in HOOK_EVENTS})
 
 
-def remove_owned_hooks(groups, script="hero_line.py", mode=None):
+def remove_owned_hooks(groups, script="hero_line.py", mode=None, stale_entries=None):
     """Remove only owned commands inside a group; keep its other metadata."""
     out = []
     for group in groups:
         if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
             out.append(group)
             continue
-        kept = [h for h in group["hooks"] if not (isinstance(h, dict)
-                and h.get("type") == "command"
-                and owned_command(h.get("command"), script, mode))]
+        kept = []
+        for h in group["hooks"]:
+            if (isinstance(h, dict) and h.get("type") == "command"
+                    and owned_command(h.get("command"), script, mode)):
+                if stale_entries is not None and owned_command(h.get("command"), script, mode, stale_only=True):
+                    stale_entries.append(h)
+            else:
+                kept.append(h)
         if kept == group["hooks"]:
             out.append(group)
         elif kept:
@@ -1248,6 +1311,26 @@ def main(argv):
             handle_hook(argv[argv.index("--hook") + 1])
         except Exception:
             pass
+        return 0
+    if "--snippets" in argv:
+        i = argv.index("--snippets")
+        val = argv[i + 1] if i + 1 < len(argv) else ""
+        if val not in ("on", "off"):
+            print("usage: --snippets on|off")
+            return 1
+        with session_lock():
+            save_config({"snippets": val})
+            if val == "off":
+                for name in os.listdir(SESS_DIR):
+                    if not name.endswith(".json"):
+                        continue
+                    path = os.path.join(SESS_DIR, name)
+                    s = load_json(path)
+                    if s is not None and ("activity" in s or "activity_ts" in s):
+                        s.pop("activity", None)
+                        s.pop("activity_ts", None)
+                        atomic_write(path, s, strict=True)
+        print("snippets → %s" % val)
         return 0
     if "--style" in argv:
         i = argv.index("--style")

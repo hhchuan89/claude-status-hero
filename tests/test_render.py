@@ -349,7 +349,7 @@ mk = lambda sid, started, ts, st="working": json.dump(
     open(os.path.join(sess2, sid + ".json"), "w"))
 mk("younger", now - 10, now)
 mk("older", now - 500, now)
-mk("corpse", now - 90000, now - 90000)   # >24h: should be buried
+mk("corpse", now - 8 * 86400, now - 8 * 86400)   # no pid, >7 days: bury
 json.dump({"sid": "gone", "ended": True, "ts": now},       # fresh tombstone
           open(os.path.join(sess2, "gone.json"), "w"))
 json.dump({"sid": "gone2", "ended": True, "ts": now - 120},  # aged tombstone
@@ -357,7 +357,7 @@ json.dump({"sid": "gone2", "ended": True, "ts": now - 120},  # aged tombstone
 p = run(BOARD, ["--once", "--office"], env_extra={"_dir": state_dir2},
         cols="120", lines="30")
 out = ANSI.sub("", p.stdout)
-check("board hides day-old corpse", "corpse" not in out)
+check("board hides week-old corpse without pid", "corpse" not in out)
 check("corpse file removed", not os.path.exists(os.path.join(sess2, "corpse.json")))
 check("board hides fresh tombstone", "gone" not in out)
 check("fresh tombstone KEPT on disk",      # burying it early would re-open

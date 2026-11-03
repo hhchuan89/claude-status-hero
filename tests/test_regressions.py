@@ -70,7 +70,60 @@ class AuditTests(unittest.TestCase):
         self.assertFalse(hl.owned_command('python3 /tmp/other-hero_line.py'))
         with patch.object(hl, '__file__', "/tmp/a 'quote'/hero_line.py"):
             self.assertTrue(hl.owned_command(hl.shell_cmd(sys.executable, hl.__file__)))
-        self.assertFalse(hl.owned_command(hl.shell_cmd(sys.executable, '/another/app/hero_line.py')))
+        live = self.root / 'another app' / 'hero_line.py'
+        live.parent.mkdir()
+        live.touch()
+        self.assertFalse(hl.owned_command(hl.shell_cmd(sys.executable, str(live))))
+
+    def test_dead_checkout_hooks_are_swept_but_live_foreign_hooks_survive(self):
+        dead = self.root / 'old checkout' / 'hero_line.py'
+        live = self.root / 'other tool' / 'hero_line.py'
+        live.parent.mkdir()
+        live.touch()
+        foreign = {'type': 'command', 'command': hl.shell_cmd(sys.executable, str(live), '--hook', 'Stop')}
+        mention = {'type': 'command', 'command': hl.shell_cmd('echo', str(dead), '--hook', 'Stop')}
+        for writer in (hl.install, hl.uninstall):
+            hooks = {}
+            for event, matcher, arg in hl.HOOK_EVENTS:
+                group = {'hooks': [{'type': 'command', 'command': hl.shell_cmd(sys.executable, str(dead), '--hook', arg)}]}
+                if matcher:
+                    group['matcher'] = matcher
+                hooks.setdefault(event, []).append(group)
+            hooks['Stop'].append({'hooks': [foreign, mention], 'extra': 9})
+            self.settings.write_text(json.dumps({'statusLine': {'type': 'command', 'command': hl.shell_cmd(sys.executable, str(dead))}, 'hooks': hooks}))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                writer(['--settings', str(self.settings)])
+            data = json.loads(self.settings.read_text())
+            self.assertIn('stale entries swept: 10', out.getvalue())
+            self.assertIn({'hooks': [foreign, mention], 'extra': 9}, data['hooks']['Stop'])
+            commands = [h['command'] for groups in data['hooks'].values() for g in groups for h in g['hooks']]
+            self.assertEqual(sum(hl.owned_command(c) for c in commands), 9 if writer == hl.install else 0)
+            self.assertFalse(any(hl.owned_command(c, stale_only=True) for c in commands))
+        # Unknown filesystem access must not classify a possibly live tool as stale.
+        with patch.object(hl.os, 'stat', side_effect=PermissionError):
+            self.assertFalse(hl.owned_command(hl.shell_cmd(sys.executable, str(dead))))
+
+    def test_replaced_statusline_is_private_and_restored_after_reinstall(self):
+        foreign = {'type': 'command', 'command': 'bash "$HOME/.claude/statusline-command.sh" --token synthetic-private-marker',
+                   'padding': 3, 'custom': {'verbatim': ['x', 2, None]}}
+        self.settings.write_text(json.dumps({'statusLine': foreign}))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            hl.install(['--settings', str(self.settings)])
+            hl.install(['--settings', str(self.settings)])
+            self.assertEqual(hl.load_config()['replaced_statusline'], foreign)
+            if os.name != 'nt':
+                self.assertEqual((Path(hl.STATE_DIR) / 'config.json').stat().st_mode & 0o777, 0o600)
+            hl.uninstall(['--settings', str(self.settings)])
+        self.assertEqual(json.loads(self.settings.read_text())['statusLine'], foreign)
+        self.assertIn('restored previous statusline', out.getvalue())
+        self.assertNotIn('synthetic-private-marker', out.getvalue())
+        # A foreign statusline selected after installation is left alone.
+        replacement = {'type': 'command', 'command': 'another-tool'}
+        self.settings.write_text(json.dumps({'statusLine': replacement}))
+        hl.uninstall(['--settings', str(self.settings)])
+        self.assertEqual(json.loads(self.settings.read_text())['statusLine'], replacement)
 
     def test_concurrent_metrics_cannot_rollback_hook(self):
         hl.update_session('race', {'state': 'working', 'state_ts': 1})
@@ -93,15 +146,47 @@ h.update_session('race', {'cost': 12})
         while not ready.exists() and time.monotonic() < deadline:
             time.sleep(.005)
         self.assertTrue(ready.exists())
-        hook = subprocess.Popen([sys.executable, '-c', "import hero_line as h; h.update_session('race', {'state':'needs_you','state_ts':2})"], env=env, cwd=str(ROOT))
+        hook = subprocess.Popen([sys.executable, '-c', "import hero_line as h; h.update_session('race', {'state':'needs_you','state_ts':2}, hook=True)"], env=env, cwd=str(ROOT))
         self.addCleanup(lambda: hook.poll() is None and hook.kill())
-        time.sleep(.15)
+        time.sleep(1.3)  # longer than the metrics timeout, within the hook budget
         release.touch()
         self.assertEqual(metrics.wait(timeout=5), 0)
         self.assertEqual(hook.wait(timeout=5), 0)
         saved = hl.load_json(hl.sess_path('race'))
         self.assertEqual(saved['state'], 'needs_you')
         self.assertEqual(saved['cost'], 12)
+
+    def test_hook_lock_timeout_preserves_state_and_tombstone(self):
+        hl._ensure_dirs()
+        cases = [('SessionStart', 'working'), ('NeedsYouPermission', 'needs_you'),
+                 ('NeedsYouIdle', 'needs_you'), ('Stop', 'idle'),
+                 ('UserPromptSubmit', 'working'), ('PostToolUse', 'working'),
+                 ('PreCompact', 'compacting'), ('PostCompact', 'working'), ('SessionEnd', None)]
+        for event, state in cases:
+            with self.subTest(event=event), patch.object(hl, 'session_lock', side_effect=TimeoutError) as lock, patch.object(hl.sys, 'stdin', io.StringIO('{"session_id":"contended"}')):
+                hl.handle_hook(event)
+                lock.assert_called_once_with(timeout=3.0)
+            saved = hl.load_json(hl.sess_path('contended'))
+            if state is None:
+                self.assertTrue(saved['ended'])
+            else:
+                self.assertEqual(saved['state'], state)
+        before = hl.load_json(hl.sess_path('contended'))
+        with patch.object(hl, 'session_lock', side_effect=TimeoutError):
+            hl.update_session('contended', {'cost': 99})
+        self.assertEqual(hl.load_json(hl.sess_path('contended')), before)
+        with patch.object(hl, 'session_lock', side_effect=TimeoutError), patch.object(hl.sys, 'stdin', io.StringIO('{"session_id":"contended"}')):
+            hl.handle_hook('SessionStart')
+        self.assertFalse(hl.load_json(hl.sess_path('contended')).get('ended'))
+
+    def test_session_end_survives_a_real_held_lock_within_hook_budget(self):
+        env = dict(os.environ, STATUS_HERO_DIR=hl.STATE_DIR)
+        with hl.session_lock():
+            result = subprocess.run([sys.executable, str(ROOT / 'hero_line.py'), '--hook', 'SessionEnd'],
+                                    input='{"session_id":"held-lock"}', text=True, capture_output=True,
+                                    env=env, cwd=str(ROOT), timeout=4.5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(hl.load_json(hl.sess_path('held-lock'))['ended'])
 
     def test_only_session_start_can_resume_tombstone(self):
         with patch.object(hl.sys, 'stdin', io.StringIO('{"session_id":"end"}')):
@@ -319,6 +404,73 @@ h.update_session('race', {'cost': 12})
         hl.atomic_write(path, saved)
         hl.all_sessions()
         self.assertTrue(Path(path).exists())
+
+    def test_age_cleanup_requires_dead_pid_or_seven_days_without_pid(self):
+        hl._ensure_dirs()
+        cases = [('live', 8, 101), ('unknown', 8, 102), ('dead', 2, 103),
+                 ('recent-dead', .5, 103), ('no-pid', 2, None), ('old-no-pid', 8, None)]
+        for reader in (hl.all_sessions, hb.fleet):
+            for sid, days, pid in cases:
+                hl.atomic_write(hl.sess_path(sid), {'sid': sid, 'ts': time.time() - days * 86400, 'ppid': pid})
+            with patch.object(hb, 'live_sids', return_value=set()), patch.object(hl, 'pid_alive', side_effect=lambda pid: {101: True, 102: None, 103: False}.get(pid)):
+                self.assertEqual({s['sid'] for s in reader()}, {'live', 'unknown', 'recent-dead', 'no-pid'})
+            self.assertTrue(Path(hl.sess_path('unknown')).exists())
+            self.assertFalse(Path(hl.sess_path('dead')).exists())
+            self.assertFalse(Path(hl.sess_path('old-no-pid')).exists())
+
+    def test_snippet_credentials_are_redacted_before_storage_and_truncation(self):
+        secrets = ['sk-synthetic123', 'sk-ant-api03-synthetic123', 'ghp_synthetic123',
+                   'gho_synthetic123', 'github_pat_synthetic123',
+                   'xoxa-synthetic-123', 'xoxb-synthetic-123', 'xoxp-synthetic-123', 'xoxr-synthetic-123',
+                   'AKIA' + 'A' * 16, 'ASIA' + 'B' * 16, 'Bearer synthetic-token123',
+                   'eyJzeW50aGV0aWM.eyJ0ZXN0.signature', 'https://user:synthetic-password@example.test',
+                   'https://user:synthetic@password@example.test',
+                   'KEY=synthetic-value', 'TOKEN="synthetic value"', "SECRET='synthetic value'",
+                   'PASSWORD=synthetic-value', 'API_KEY=synthetic-value', 'ACCESS_TOKEN=synthetic-value']
+        for secret in secrets:
+            with self.subTest(secret=secret):
+                expected = 'https://[REDACTED]example.test' if '://' in secret else '[REDACTED]'
+                self.assertEqual(hl.redact(secret), expected)
+                for event, fields in [('UserPromptSubmit', {'prompt': secret}),
+                                      ('PostToolUse', {'tool_name': 'Bash', 'tool_input': {'command': secret}})]:
+                    with patch.object(hl.sys, 'stdin', io.StringIO(json.dumps(dict(session_id='private', **fields)))):
+                        hl.handle_hook(event)
+                    saved = hl.load_json(hl.sess_path('private'))
+                    self.assertEqual(saved['activity'], ('you: ' if event == 'UserPromptSubmit' else 'Bash: ') + expected)
+                    self.assertNotIn(secret, Path(hl.sess_path('private')).read_text())
+        # A secret crossing the snippet boundary is masked in full first.
+        for event, fields, prefix in [
+            ('UserPromptSubmit', {'prompt': 'x' * 45 + ' sk-' + 's' * 100}, 'you: ' + 'x' * 45 + ' [REDACTED]'),
+            ('PostToolUse', {'tool_name': 'Bash', 'tool_input': {'command': 'x' * 25 + ' ghp_' + 's' * 100}}, 'Bash: ' + 'x' * 25 + ' [REDACTED]')]:
+            with patch.object(hl.sys, 'stdin', io.StringIO(json.dumps(dict(session_id='private', **fields)))):
+                hl.handle_hook(event)
+            self.assertEqual(hl.load_json(hl.sess_path('private'))['activity'], prefix)
+        self.assertEqual(hl.redact('pytest -q tests/test_render.py'), 'pytest -q tests/test_render.py')
+
+    def test_snippets_off_clears_existing_text_and_stores_no_new_text(self):
+        hl.update_session('private', {'activity': 'synthetic old prompt', 'activity_ts': 1})
+        self.assertEqual(hl.main(['--snippets', 'off']), 0)
+        self.assertEqual(hl.load_config()['snippets'], 'off')
+        saved = hl.load_json(hl.sess_path('private'))
+        self.assertNotIn('activity', saved)
+        self.assertNotIn('activity_ts', saved)
+        for event, fields, state in [
+            ('UserPromptSubmit', {'prompt': 'synthetic hidden prompt'}, 'working'),
+            ('PostToolUse', {'tool_name': 'synthetic hidden tool', 'tool_input': {'command': 'synthetic hidden command'}}, 'working'),
+            ('NeedsYouPermission', {}, 'needs_you'), ('Stop', {}, 'idle')]:
+            with patch.object(hl.sys, 'stdin', io.StringIO(json.dumps(dict(session_id='private', **fields)))):
+                hl.handle_hook(event)
+            saved = hl.load_json(hl.sess_path('private'))
+            self.assertEqual(saved['state'], state)
+            self.assertNotIn('activity', saved)
+            self.assertNotIn('synthetic hidden', Path(hl.sess_path('private')).read_text())
+        self.assertEqual(hl.main(['--snippets', 'on']), 0)
+        with patch.object(hl.sys, 'stdin', io.StringIO('{"session_id":"private","prompt":"visible again"}')):
+            hl.handle_hook('UserPromptSubmit')
+        self.assertEqual(hl.load_json(hl.sess_path('private'))['activity'], 'you: visible again')
+        for argv in (['--snippets'], ['--snippets', 'invalid']):
+            self.assertEqual(hl.main(argv), 1)
+        self.assertEqual(hl.load_config()['snippets'], 'on')
 
     def test_sanitized_or_truncated_session_ids_do_not_alias(self):
         for left, right in (('../x', '___x'), ('a' * 80 + 'x', 'a' * 80 + 'y')):

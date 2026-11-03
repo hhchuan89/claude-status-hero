@@ -482,8 +482,10 @@ def fleet(now=None):
                 except Exception:
                     pass
             continue
-        if (now - (num(s.get("ts")) or 0) > 24 * 3600
-                and s["sid"] not in live and pid_alive(s.get("ppid")) is not True):
+        age = now - (num(s.get("ts")) or 0)
+        if (s["sid"] not in live
+                and (age > 24 * 3600 and pid_alive(s.get("ppid")) is False
+                     or age > 7 * 24 * 3600 and not s.get("ppid"))):
             try:
                 prune_session(path, snapshot)
             except Exception:
