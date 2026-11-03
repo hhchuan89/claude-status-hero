@@ -320,6 +320,14 @@ h.update_session('race', {'cost': 12})
         hl.all_sessions()
         self.assertTrue(Path(path).exists())
 
+    def test_sanitized_or_truncated_session_ids_do_not_alias(self):
+        for left, right in (('../x', '___x'), ('a' * 80 + 'x', 'a' * 80 + 'y')):
+            self.assertNotEqual(hl.sess_path(left), hl.sess_path(right))
+            hl.update_session(left, {'cost': 1})
+            hl.update_session(right, {'cost': 2})
+            self.assertEqual(hl.load_json(hl.sess_path(left))['cost'], 1)
+            self.assertEqual(hl.load_json(hl.sess_path(right))['cost'], 2)
+
 
 def run_checks(check):
     class Results(unittest.TestResult):

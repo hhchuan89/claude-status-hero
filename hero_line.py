@@ -268,9 +268,18 @@ def _ensure_dirs():
         pass
 
 
+def session_key(sid):
+    raw = str(sid)
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", raw)[:80] or "unknown"
+    if safe != raw:
+        # Sanitizing/truncating alone aliases distinct untrusted identifiers.
+        digest = hashlib.sha256(raw.encode("utf-8", "surrogatepass")).hexdigest()[:20]
+        safe = safe[:48] + "-" + digest
+    return safe
+
+
 def sess_path(sid):
-    safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(sid))[:80] or "unknown"
-    return os.path.join(SESS_DIR, safe + ".json")
+    return os.path.join(SESS_DIR, session_key(sid) + ".json")
 
 
 def load_json(path):
@@ -398,6 +407,7 @@ def session_lock():
 def update_session(sid, updates, resume=False):
     if not sid:
         return
+    sid = session_key(sid)
     try:
         with session_lock():
             path = sess_path(sid)
@@ -586,6 +596,7 @@ def render(data, width=None):
     seven_rs = get(data, "rate_limits", "seven_day", "resets_at")
     fable = read_fable()  # model-scoped weekly; None (segment hidden) if absent
     sid = get(data, "session_id")
+    sid = session_key(sid) if sid else None
 
     branch = sanitize(git_branch(get(data, "workspace", "current_dir")
                                  or get(data, "cwd")), 40)
@@ -914,6 +925,7 @@ def handle_hook(event):
     sid = payload.get("session_id")
     if not sid:
         return
+    sid = session_key(sid)
     now = time.time()
 
     if event == "SessionEnd":
